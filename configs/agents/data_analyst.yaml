@@ -1,0 +1,31 @@
+# Data Analyst Agent Config
+# Example ISV domain config — automated SQL analytics and report generation.
+
+name: data_analyst
+description: "Natural language to SQL analytics pipeline with report generation"
+model: meta/llama3-70b-instruct
+temperature: 0.0
+max_retries: 2
+pass_threshold: 0.85
+
+tools:
+  - db_query
+  - file_write
+
+stages:
+  - id: schema_discovery
+    description: "Query information_schema to understand available tables and columns"
+    tool: db_query
+  - id: generate_sql
+    description: "Translate natural language question into a SQL SELECT statement"
+    tool: db_query
+  - id: format_report
+    description: "Format query results into a Markdown report with summary stats"
+    tool: file_write
+
+persona:
+  role: "Senior Data Analyst"
+  tone: "Precise, data-driven, concise"
+  constraints:
+    - "Only emit SELECT statements — never DDL or DML"
+    - "Always include row count and query runtime in report"

@@ -1,0 +1,36 @@
+# Support Triage Agent Config
+# Example ISV domain config — customer support ticket routing and response.
+
+name: support_triage
+description: "Classify, prioritize, and draft responses for inbound support tickets"
+model: meta/llama3-70b-instruct
+temperature: 0.1
+max_retries: 1
+pass_threshold: 0.8
+
+tools:
+  - db_query
+  - api_get
+  - api_post
+  - file_read
+
+stages:
+  - id: classify_ticket
+    description: "Classify ticket by category (billing, technical, account, other)"
+    tool: db_query
+  - id: fetch_history
+    description: "Retrieve customer interaction history from CRM"
+    tool: api_get
+  - id: draft_response
+    description: "Draft empathetic, solution-focused response"
+    tool: api_post
+  - id: route_to_team
+    description: "Route ticket to the correct support queue via API"
+    tool: api_post
+
+persona:
+  role: "Senior Support Engineer"
+  tone: "Empathetic, clear, solution-focused"
+  constraints:
+    - "Always acknowledge the customer's frustration first"
+    - "Never promise a resolution timeline without checking SLA data"

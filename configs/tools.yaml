@@ -1,0 +1,40 @@
+# Tool capability registry
+# Describes available tools, their input schemas, and which agent configs may use them.
+# Used by graph_builder.py to validate tool bindings at startup.
+
+tools:
+  api_get:
+    description: "HTTP GET request — returns parsed JSON"
+    inputs:
+      url: string
+      params: object (optional)
+      headers: object (optional)
+    safe: true
+
+  api_post:
+    description: "HTTP POST request with JSON body — returns parsed JSON"
+    inputs:
+      url: string
+      body: object (optional)
+      headers: object (optional)
+    safe: false  # mutates external state
+
+  db_query:
+    description: "Read-only SQL SELECT query — returns list of row dicts"
+    inputs:
+      sql: string
+      params: object (optional)
+    safe: true
+
+  file_read:
+    description: "Read UTF-8 text file — returns string contents"
+    inputs:
+      path: string
+    safe: true
+
+  file_write:
+    description: "Write UTF-8 text file — returns path and bytes written"
+    inputs:
+      path: string
+      content: string
+    safe: false  # mutates filesystem
