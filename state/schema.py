@@ -1,39 +1,43 @@
-"""TypedDict state schema for the OPER multi-agent pattern."""
+"""TypedDict state schema for the multi-agent OPER pipeline."""
 from __future__ import annotations
 
-from typing import Any, Optional
-from typing_extensions import TypedDict
-from langchain_core.messages import BaseMessage
+from typing import Any, TypedDict
 
 
 class AgentState(TypedDict, total=False):
-    """Shared state propagated through all OPER graph nodes."""
+    """Shared state passed between all OPER nodes.
 
-    # Input
-    goal: str                          # Original user goal — immutable
-    session_id: str                    # Unique run identifier
-    config_name: str                   # Agent config YAML name
+    Fields
+    ------
+    goal:
+        The user's original (and optionally orchestrator-refined) goal.
+    context:
+        Enriched domain context added by the Orchestrator.
+    tasks:
+        Ordered list of task dicts produced by the Planner.
+    current_task_index:
+        Pointer into *tasks* — which task the Executor should run next.
+    results:
+        Accumulated list of task result dicts from the Executor.
+    review_score:
+        Latest quality score from the Reviewer (0.0 – 1.0).
+    retry:
+        True if the Reviewer wants the Executor to re-run.
+    retry_count:
+        Number of retry cycles consumed so far.
+    messages:
+        Full conversation / trace log (role + content dicts).
+    metadata:
+        Arbitrary run-level metadata (run_id, user_id, domain, etc.).
+    """
 
-    # Orchestrator outputs
-    intent: str                        # Structured intent extracted from goal
-
-    # Planner outputs
-    tasks: list[dict[str, Any]]        # Ordered task list [{id, description, tool, args}]
-    current_task_index: int            # Index of task being executed
-
-    # Executor outputs
-    task_results: list[dict[str, Any]] # [{task_id, description, tool, result}]
-    executor_complete: bool            # True when all tasks processed
-
-    # Reviewer outputs
-    reviewer_decision: str             # "terminate" | "retry"
-    reviewer_score: float              # 0.0 – 1.0
-    reviewer_reasoning: str
-    final_answer: str                  # Synthesized answer (on terminate)
-
-    # Loop control
+    goal: str
+    context: str
+    tasks: list[dict[str, Any]]
+    current_task_index: int
+    results: list[dict[str, Any]]
+    review_score: float
+    retry: bool
     retry_count: int
-    max_retries: int
-
-    # Message history (for tracing / LangSmith)
-    messages: list[BaseMessage]
+    messages: list[dict[str, str]]
+    metadata: dict[str, Any]

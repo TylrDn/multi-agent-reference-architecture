@@ -1,59 +1,41 @@
-"""Dynamic tool registry — loads tools from YAML config, returns LangChain StructuredTools."""
+"""Dynamic tool loader: reads tool names from YAML config and returns LangChain StructuredTools."""
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
+import logging
 from typing import Any
 
-import yaml
-from langchain_core.tools import StructuredTool
+from langchain_core.tools import BaseTool
 
-DEFAULT_TOOLS_CONFIG = Path(__file__).parent.parent / "configs" / "tools.yaml"
+logger = logging.getLogger(__name__)
+
+_BUILTIN_TOOLS: dict[str, str] = {
+    "api_node": "tools.api_node.api_node",
+    "db_node": "tools.db_node.db_node",
+    "file_node": "tools.file_node.file_node",
+}
 
 
 class ToolRegistry:
-    """Loads tool specs from YAML and provides a uniform invocation interface."""
+    """Resolves tool names from agent YAML configs to LangChain tool instances."""
 
-    def __init__(self, tool_specs: list[dict[str, Any]] | None = None, config_path: Path = DEFAULT_TOOLS_CONFIG) -> None:
-        self._tools: dict[str, Any] = {}
-        self._langchain_tools: list[StructuredTool] = []
+    def __init__(self, tool_names: list[str]) -> None:
+        self.tool_names = tool_names
 
-        # Load from config YAML if available
-        if config_path.exists():
-            with open(config_path) as f:
-                all_tool_defs = yaml.safe_load(f) or {}
-        else:
-            all_tool_defs = {}
-
-        # Filter to only the tools requested by the agent config
-        requested = {t["name"] for t in (tool_specs or [])} if tool_specs else set(all_tool_defs.keys())
-
-        for name, spec in all_tool_defs.items():
-            if name not in requested:
+    def load(self) -> list[BaseTool]:
+        """Return a list of instantiated tool objects for the requested names."""
+        tools: list[BaseTool] = []
+        for name in self.tool_names:
+            dotpath = _BUILTIN_TOOLS.get(name)
+            if dotpath is None:
+                logger.warning("[ToolRegistry] Unknown tool '%s'; skipping.", name)
                 continue
-            module_path = spec.get("module")
-            func_name = spec.get("function")
-            description = spec.get("description", name)
-            if module_path and func_name:
-                try:
-                    mod = importlib.import_module(module_path)
-                    fn = getattr(mod, func_name)
-                    tool = StructuredTool.from_function(fn, name=name, description=description)
-                    self._tools[name] = tool
-                    self._langchain_tools.append(tool)
-                except (ImportError, AttributeError) as e:
-                    print(f"[ToolRegistry] Could not load tool '{name}': {e}")
-
-    def has(self, name: str) -> bool:
-        return name in self._tools
-
-    def invoke(self, name: str, args: dict[str, Any]) -> Any:
-        if not self.has(name):
-            raise ValueError(f"Tool '{name}' not in registry")
-        return self._tools[name].invoke(args)
-
-    def get_langchain_tools(self) -> list[StructuredTool]:
-        return self._langchain_tools
-
-    def list_tools(self) -> list[str]:
-        return list(self._tools.keys())
+            module_path, attr = dotpath.rsplit(".", 1)
+            try:
+                mod = importlib.import_module(module_path)
+                tool = getattr(mod, attr)
+                tools.append(tool)
+                logger.info("[ToolRegistry] Loaded tool: %s", name)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[ToolRegistry] Failed to load tool '%s': %s", name, exc)
+        return tools

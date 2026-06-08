@@ -1,35 +1,45 @@
-"""SQL query tool node — schema-safe, read-only by default."""
+"""SQL query tool node — executes read-only SQL via SQLAlchemy."""
 from __future__ import annotations
 
-import os
+import json
+import logging
+from typing import Optional
 
-from sqlalchemy import create_engine, text
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
-DB_URL = os.getenv("DATABASE_URL", "sqlite:///./agent_demo.db")
-_engine = None
-
-
-def _get_engine():
-    global _engine
-    if _engine is None:
-        _engine = create_engine(DB_URL)
-    return _engine
+logger = logging.getLogger(__name__)
 
 
-def db_query(sql: str) -> str:
-    """Execute a read-only SQL query and return results as a formatted string."""
-    if any(kw in sql.upper() for kw in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"]):
-        return "ERROR: Only SELECT queries are permitted."
+class DBNodeInput(BaseModel):
+    connection_string: str = Field(
+        description="SQLAlchemy connection string, e.g. postgresql+psycopg2://user:pass@host/db"
+    )
+    query: str = Field(description="SQL SELECT query to execute")
+    params: Optional[dict] = Field(default=None, description="Optional query parameters")
+    row_limit: int = Field(default=100, description="Maximum rows to return")
+
+
+@tool(args_schema=DBNodeInput)
+def db_node(
+    connection_string: str,
+    query: str,
+    params: Optional[dict] = None,
+    row_limit: int = 100,
+) -> str:
+    """Run a SQL query and return results as a JSON array of row dicts."""
     try:
-        with _get_engine().connect() as conn:
-            result = conn.execute(text(sql))
-            rows = result.fetchall()
-            keys = list(result.keys())
-            if not rows:
-                return "No results."
-            header = " | ".join(keys)
-            lines = [header, "-" * len(header)]
-            lines += [" | ".join(str(v) for v in row) for row in rows]
-            return "\n".join(lines)
-    except Exception as e:
-        return f"ERROR: {e}"
+        from sqlalchemy import create_engine, text  # type: ignore
+    except ImportError as exc:
+        return json.dumps({"error": "sqlalchemy not installed", "detail": str(exc)})
+
+    logger.info("[db_node] Executing query: %s", query[:120])
+    try:
+        engine = create_engine(connection_string)
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params or {})
+            rows = [dict(row._mapping) for row in result.fetchmany(row_limit)]
+        return json.dumps(rows, default=str)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("[db_node] Query failed: %s", exc)
+        return json.dumps({"error": str(exc)})
