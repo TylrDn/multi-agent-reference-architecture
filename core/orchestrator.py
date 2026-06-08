@@ -1,46 +1,53 @@
-"""Top-level router: validates the incoming goal, enriches context, delegates to planner."""
+"""Orchestrator node — top-level router that decomposes the user goal."""
 from __future__ import annotations
 
-import logging
-from typing import Any
-
+import os
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-
 from state.schema import AgentState
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NIM_MODEL = os.getenv("NIM_MODEL", "meta/llama-3.1-70b-instruct")
 
-_SYSTEM_PROMPT = """\
-You are the Orchestrator of a multi-agent pipeline.
-Your job is to:
-1. Validate the user goal is within scope.
-2. Enrich the context with any domain-specific framing.
-3. Return a single JSON object: {{"goal": "<refined goal>", "context": "<enriched context>"}}.
-Do not execute tasks yourself — only clarify and route.
-"""
+SYSTEM_PROMPT = """You are the Orchestrator in a multi-agent pipeline.
+Your role is to understand the user's goal, identify the domain, and
+determine the high-level strategy before passing to the Planner.
+Respond with a concise strategy statement (2-3 sentences max)."""
+
+
+def _get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=NIM_MODEL,
+        base_url=NIM_BASE_URL,
+        api_key=NIM_API_KEY,
+        temperature=0.0,
+    )
+
+
+def orchestrator_node(state: AgentState) -> dict:
+    """Analyze the user goal and set orchestration strategy."""
+    llm = _get_llm()
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Goal: {state['goal']}"},
+    ]
+    response = llm.invoke(messages)
+    return {
+        "strategy": response.content,
+        "iteration": 0,
+        "messages": state.get("messages", []) + [{"role": "orchestrator", "content": response.content}],
+    }
 
 
 class Orchestrator:
-    def __init__(self, cfg: dict[str, Any]) -> None:
-        self.model = cfg.get("model", "gpt-4o-mini")
-        self.temperature = cfg.get("temperature", 0.0)
-        self.llm = ChatOpenAI(model=self.model, temperature=self.temperature)
+    """Standalone orchestrator for direct invocation."""
 
-    def run(self, state: AgentState) -> AgentState:
-        logger.info("[Orchestrator] Routing goal: %s", state["goal"])
+    def __init__(self) -> None:
+        self.llm = _get_llm()
+
+    def run(self, goal: str) -> str:
         messages = [
-            SystemMessage(content=_SYSTEM_PROMPT),
-            HumanMessage(content=f"Goal: {state['goal']}"),
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Goal: {goal}"},
         ]
-        response = self.llm.invoke(messages)
-        import json
-        try:
-            parsed = json.loads(response.content)
-            state["goal"] = parsed.get("goal", state["goal"])
-            state["context"] = parsed.get("context", "")
-        except json.JSONDecodeError:
-            logger.warning("[Orchestrator] Could not parse JSON; using raw content as context.")
-            state["context"] = response.content
-        state["messages"].append({"role": "orchestrator", "content": response.content})
-        return state
+        return self.llm.invoke(messages).content

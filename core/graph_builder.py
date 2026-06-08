@@ -1,4 +1,4 @@
-"""Assembles a LangGraph StateGraph from a YAML agent config file."""
+"""Dynamically assembles a LangGraph StateGraph from a YAML agent config."""
 from __future__ import annotations
 
 import yaml
@@ -6,60 +6,51 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 
+from core.orchestrator import orchestrator_node
+from core.planner import planner_node
+from core.executor import executor_node
+from core.reviewer import reviewer_node, should_retry
 from state.schema import AgentState
-from core.orchestrator import Orchestrator
-from core.planner import Planner
-from core.executor import Executor
-from core.reviewer import Reviewer
-from tools.registry import ToolRegistry
 
 
-def build_graph(
-    config_path: str | Path,
-    checkpointer: MemorySaver | None = None,
-) -> Any:
-    """Load *config_path* YAML and wire a LangGraph StateGraph.
+def build_graph(config_path: str | Path) -> Any:
+    """Build and compile a LangGraph from a YAML agent config.
 
-    Returns a compiled graph ready to invoke.
+    Args:
+        config_path: Path to an agent YAML config (e.g. configs/agents/sales_pipeline.yaml)
+
+    Returns:
+        A compiled LangGraph runnable.
     """
     config_path = Path(config_path)
-    with config_path.open() as fh:
-        cfg = yaml.safe_load(fh)
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
 
-    registry = ToolRegistry(cfg.get("tools", []))
-    tools = registry.load()
+    graph = StateGraph(AgentState)
 
-    orchestrator = Orchestrator(cfg["orchestrator"])
-    planner = Planner(cfg["planner"])
-    executor = Executor(cfg["executor"], tools=tools)
-    reviewer = Reviewer(cfg["reviewer"])
+    # Core OPER nodes — always present
+    graph.add_node("orchestrator", orchestrator_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("executor", executor_node)
+    graph.add_node("reviewer", reviewer_node)
 
-    builder = StateGraph(AgentState)
+    # Entry point
+    graph.set_entry_point("orchestrator")
 
-    builder.add_node("orchestrator", orchestrator.run)
-    builder.add_node("planner", planner.run)
-    builder.add_node("executor", executor.run)
-    builder.add_node("reviewer", reviewer.run)
+    # Static edges: orchestrator -> planner -> executor -> reviewer
+    graph.add_edge("orchestrator", "planner")
+    graph.add_edge("planner", "executor")
+    graph.add_edge("executor", "reviewer")
 
-    builder.set_entry_point("orchestrator")
-    builder.add_edge("orchestrator", "planner")
-    builder.add_edge("planner", "executor")
-    builder.add_edge("executor", "reviewer")
-
-    builder.add_conditional_edges(
+    # Conditional edge: reviewer loops back to planner or terminates
+    graph.add_conditional_edges(
         "reviewer",
-        _route_after_review,
-        {"retry": "executor", "done": END},
+        should_retry,
+        {
+            "retry": "planner",
+            "done": END,
+        },
     )
 
-    cp = checkpointer or MemorySaver()
-    return builder.compile(checkpointer=cp)
-
-
-def _route_after_review(state: AgentState) -> str:
-    """Route: retry executor when reviewer score is below threshold."""
-    if state.get("retry", False):
-        return "retry"
-    return "done"
+    return graph.compile()

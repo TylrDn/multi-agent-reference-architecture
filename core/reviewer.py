@@ -1,68 +1,105 @@
-"""Scores executor output and routes to retry or terminate."""
+"""Reviewer node — scores executor output and routes to retry or done."""
 from __future__ import annotations
 
-import json
-import logging
-from typing import Any
-
+import os
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-
 from state.schema import AgentState
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+NIM_MODEL = os.getenv("NIM_MODEL", "meta/llama-3.1-70b-instruct")
+SCORE_THRESHOLD = float(os.getenv("REVIEWER_SCORE_THRESHOLD", "0.75"))
+MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "3"))
 
-_SYSTEM_PROMPT = """\
-You are the Reviewer in a multi-agent pipeline.
-Evaluate the latest executor result against the original goal.
-Return ONLY a JSON object:
-{{"score": <0.0–1.0>, "feedback": "<one sentence>", "retry": <true|false>}}
-Set retry=true only if score < 0.7 AND there are remaining tasks.
-"""
+SYSTEM_PROMPT = """You are the Reviewer in a multi-agent pipeline.
+Score the quality of the executor's output on a scale of 0.0 to 1.0.
+Respond ONLY with a JSON object: {"score": 0.85, "feedback": "reason"}
+Score >= 0.75 means the output is acceptable."""
+
+
+def _get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=NIM_MODEL,
+        base_url=NIM_BASE_URL,
+        api_key=NIM_API_KEY,
+        temperature=0.0,
+    )
+
+
+def reviewer_node(state: AgentState) -> dict:
+    """Score the latest executor output and decide to retry or finish."""
+    import json
+
+    llm = _get_llm()
+    task_results = state.get("task_results", [])
+    latest = task_results[-1] if task_results else {"task": "", "result": ""}
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"Task: {latest['task']}\nOutput: {latest['result']}\nGoal: {state['goal']}",
+        },
+    ]
+    response = llm.invoke(messages)
+    try:
+        data = json.loads(response.content)
+        score = float(data.get("score", 0.0))
+        feedback = data.get("feedback", "")
+    except (json.JSONDecodeError, ValueError):
+        score = 0.5
+        feedback = response.content
+
+    # Check if all tasks are complete
+    tasks = state.get("tasks", [])
+    current_idx = state.get("current_task_index", 0)
+    all_tasks_done = current_idx >= len(tasks)
+
+    return {
+        "review_score": score,
+        "review_feedback": feedback,
+        "iteration": state.get("iteration", 0) + 1,
+        "messages": state.get("messages", []) + [{"role": "reviewer", "content": feedback}],
+        "final_answer": _compile_answer(state) if (score >= SCORE_THRESHOLD or all_tasks_done) else "",
+    }
+
+
+def should_retry(state: AgentState) -> str:
+    """Conditional edge: retry if score is low and under iteration limit."""
+    score = state.get("review_score", 0.0)
+    iteration = state.get("iteration", 0)
+    tasks = state.get("tasks", [])
+    current_idx = state.get("current_task_index", 0)
+    all_tasks_done = current_idx >= len(tasks)
+
+    if all_tasks_done or score >= SCORE_THRESHOLD or iteration >= MAX_ITERATIONS:
+        return "done"
+    return "retry"
+
+
+def _compile_answer(state: AgentState) -> str:
+    """Compile task results into a final answer."""
+    results = state.get("task_results", [])
+    if not results:
+        return ""
+    lines = [f"**{r['task']}**\n{r['result']}" for r in results]
+    return "\n\n".join(lines)
 
 
 class Reviewer:
-    def __init__(self, cfg: dict[str, Any]) -> None:
-        self.model = cfg.get("model", "gpt-4o-mini")
-        self.temperature = cfg.get("temperature", 0.0)
-        self.retry_threshold = cfg.get("retry_threshold", 0.7)
-        self.max_retries = cfg.get("max_retries", 2)
-        self.llm = ChatOpenAI(model=self.model, temperature=self.temperature)
+    """Standalone reviewer for direct invocation."""
 
-    def run(self, state: AgentState) -> AgentState:
-        results = state.get("results", [])
-        retry_count = state.get("retry_count", 0)
+    def __init__(self) -> None:
+        self.llm = _get_llm()
 
-        if not results:
-            state["retry"] = False
-            return state
-
-        latest = results[-1]
-        prompt = (
-            f"Original goal: {state['goal']}\n"
-            f"Latest result: {json.dumps(latest)}\n"
-            f"Retry count so far: {retry_count}"
-        )
+    def run(self, task: str, output: str, goal: str) -> dict:
+        import json
         messages = [
-            SystemMessage(content=_SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Task: {task}\nOutput: {output}\nGoal: {goal}"},
         ]
         response = self.llm.invoke(messages)
-        logger.info("[Reviewer] Raw response: %s", response.content)
-
         try:
-            parsed = json.loads(response.content)
-            score = float(parsed.get("score", 1.0))
-            retry = bool(parsed.get("retry", False))
-        except (json.JSONDecodeError, ValueError):
-            score = 1.0
-            retry = False
-
-        if retry_count >= self.max_retries:
-            retry = False
-
-        state["review_score"] = score
-        state["retry"] = retry
-        state["retry_count"] = retry_count + (1 if retry else 0)
-        state["messages"].append({"role": "reviewer", "content": response.content})
-        return state
+            return json.loads(response.content)
+        except json.JSONDecodeError:
+            return {"score": 0.5, "feedback": response.content}

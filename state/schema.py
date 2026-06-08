@@ -1,43 +1,33 @@
-"""TypedDict state schema for the multi-agent OPER pipeline."""
+"""TypedDict state schema for the OPER multi-agent LangGraph workflow."""
 from __future__ import annotations
 
 from typing import Any, TypedDict
 
 
 class AgentState(TypedDict, total=False):
-    """Shared state passed between all OPER nodes.
+    """Shared mutable state passed between all OPER nodes."""
 
-    Fields
-    ------
-    goal:
-        The user's original (and optionally orchestrator-refined) goal.
-    context:
-        Enriched domain context added by the Orchestrator.
-    tasks:
-        Ordered list of task dicts produced by the Planner.
-    current_task_index:
-        Pointer into *tasks* — which task the Executor should run next.
-    results:
-        Accumulated list of task result dicts from the Executor.
-    review_score:
-        Latest quality score from the Reviewer (0.0 – 1.0).
-    retry:
-        True if the Reviewer wants the Executor to re-run.
-    retry_count:
-        Number of retry cycles consumed so far.
-    messages:
-        Full conversation / trace log (role + content dicts).
-    metadata:
-        Arbitrary run-level metadata (run_id, user_id, domain, etc.).
-    """
+    # Input
+    goal: str                        # The user's original goal / query
+    domain: str                      # Domain tag from config (e.g. 'sales', 'support')
+    config_name: str                 # Which agent YAML config was loaded
 
-    goal: str
-    context: str
-    tasks: list[dict[str, Any]]
-    current_task_index: int
-    results: list[dict[str, Any]]
-    review_score: float
-    retry: bool
-    retry_count: int
-    messages: list[dict[str, str]]
-    metadata: dict[str, Any]
+    # Orchestrator output
+    strategy: str                    # High-level strategy set by orchestrator
+
+    # Planner output
+    tasks: list[str]                 # Ordered task list
+    current_task_index: int          # Which task executor is on
+
+    # Executor output
+    task_results: list[dict[str, Any]]  # [{"task": ..., "result": ...}, ...]
+
+    # Reviewer output
+    review_score: float              # 0.0 – 1.0 quality score
+    review_feedback: str             # Reviewer's feedback text
+    iteration: int                   # How many review cycles have occurred
+    final_answer: str                # Compiled final answer when done
+
+    # Shared
+    messages: list[dict[str, str]]   # Full message history across all nodes
+    metadata: dict[str, Any]         # Arbitrary metadata (config, run_id, etc.)
