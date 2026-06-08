@@ -1,33 +1,14 @@
-# Tool capability registry
-# Each entry is loaded by tools/registry.py and instantiated as a LangChain StructuredTool.
-# Supported types: api | db | file
-
 tools:
-  - name: web_search
-    type: api
-    description: >-
-      Search the web for information. Pass a search query as the `url` param
-      pointing to a search API endpoint (e.g. SerpAPI, Brave Search).
-    base_url: https://api.search.brave.com/res/v1/web/search
-
-  - name: internal_api
-    type: api
-    description: Call an internal REST API endpoint with optional JSON payload.
-    base_url: ""
-
-  - name: analytics_db
-    type: db
-    description: >-
-      Query the analytics database using SQL. Returns tabular results.
-      Schema includes: customers, orders, events, products tables.
-    connection_string: ""  # Set DB_CONNECTION_STRING env var
-
-  - name: read_workspace_file
-    type: file
-    operation: read
-    description: Read a file from the agent workspace directory.
-
-  - name: write_workspace_file
-    type: file
-    operation: write
-    description: Write content to a file in the agent workspace directory.
+  api_post:
+    description: POST JSON payload to a REST endpoint
+    input_schema:
+      endpoint: string
+      payload: object
+  db_query:
+    description: Execute a SQL query against the configured database
+    input_schema:
+      query: string
+  file_read:
+    description: Read a file from disk
+    input_schema:
+      path: string

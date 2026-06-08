@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  lint-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,9 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Lint with ruff
         run: ruff check .
@@ -29,6 +27,4 @@ jobs:
         run: mypy core/ state/ tools/ api/ --ignore-missing-imports
 
       - name: Run tests
-        run: pytest tests/ -v --cov=core --cov=state --cov=tools --cov-report=term-missing
-        env:
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: pytest tests/ -v --cov=core --cov=tools --cov=state

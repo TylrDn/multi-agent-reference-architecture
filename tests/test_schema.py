@@ -1,13 +1,17 @@
-"""Tests for state schema."""
-from state.schema import AgentState
+"""Unit tests for state schema."""
+from state.schema import MultiAgentState
 
 
-def test_agent_state_minimal():
-    state: AgentState = {
-        "goal": "Test goal",
-        "messages": [],
-        "task_results": [],
+def test_state_fields() -> None:
+    state: MultiAgentState = {
+        "goal": "test goal",
+        "tasks": ["task 1"],
+        "results": ["result 1"],
+        "final_answer": "done",
+        "review_score": 0.9,
+        "confidence_threshold": 0.85,
         "retry_count": 0,
+        "agent_config": {"name": "test"},
     }
-    assert state["goal"] == "Test goal"
-    assert state["retry_count"] == 0
+    assert state["goal"] == "test goal"
+    assert state["review_score"] == 0.9

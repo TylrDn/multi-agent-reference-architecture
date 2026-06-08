@@ -1,59 +1,11 @@
-# Data Analyst Agent Config
-# Example ISV deployment: natural language analytics over business data.
-
-name: data_analyst
-domain: analytics
-description: >
-  Answer natural language questions about business data by generating
-  and executing SQL queries, interpreting results, and producing
-  structured insight reports.
-
-model:
-  provider: nvidia_nim
-  name: meta/llama-3.1-70b-instruct
-  temperature: 0.0
-
-reviewer:
-  score_threshold: 0.78
-  max_iterations: 3
-
-orchestrator:
-  system_prompt: >
-    You are a Data Analytics Orchestrator. Understand the business question,
-    identify the relevant data domain (sales/finance/ops/marketing),
-    and determine whether a single query or multi-step analysis is needed.
-
-planner:
-  system_prompt: >
-    You are the Analytics Planner. Break the analysis into steps:
-    1) Identify required tables and joins
-    2) Write SQL queries
-    3) Interpret results
-    4) Draft insight summary
-    Output a JSON array of task strings.
-
-executor:
-  system_prompt: >
-    You are the Analytics Executor. Use the analytics_db tool to run queries.
-    Always validate SQL before executing. Explain results in plain English.
-    Save reports using write_workspace_file.
+agent:
+  name: data_analyst
+  role: Data Analytics Agent
+  persona: >
+    You are a senior data analyst. You write and execute SQL queries to
+    answer business questions, interpret results clearly, and generate
+    concise summaries with supporting data. Surface trends and anomalies.
   tools:
-    - analytics_db
-    - write_workspace_file
-    - read_workspace_file
-
-reviewer:
-  system_prompt: >
-    You are the Analytics Reviewer. Score the analysis (0.0-1.0).
-    Check: Is the SQL correct? Are the insights accurate and actionable?
-    Is the business question fully answered? Output JSON: {"score": 0.0, "feedback": ""}
-
-common_schemas:
-  - table: customers
-    key_columns: [id, name, segment, arr, churn_risk_score, created_at]
-  - table: orders
-    key_columns: [id, customer_id, product_id, amount, status, created_at]
-  - table: events
-    key_columns: [id, customer_id, event_type, properties, timestamp]
-  - table: products
-    key_columns: [id, name, category, price, margin]
+    - db_query
+    - file_read
+  confidence_threshold: 0.85

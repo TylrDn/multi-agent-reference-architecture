@@ -1,74 +1,20 @@
-# Sales Pipeline Agent Config
-# Generalised from the WatsonX Competition 8-stage sales pipeline.
-# Maps to the OPER pattern: Orchestrator -> Planner -> Executor -> Reviewer
-
-name: sales_pipeline
-domain: sales
-description: >
-  Multi-stage B2B sales pipeline agent that qualifies leads,
-  researches prospects, drafts outreach, and tracks pipeline stages.
-
-model:
-  provider: nvidia_nim
-  name: meta/llama-3.1-70b-instruct
-  temperature: 0.0
-
-reviewer:
-  score_threshold: 0.80
-  max_iterations: 3
-
-orchestrator:
-  system_prompt: >
-    You are a B2B Sales Orchestrator. Your role is to understand the sales
-    goal, identify the sales stage (prospecting/qualification/outreach/closing),
-    and set the strategy for the planner. Be concise and directive.
-
-planner:
-  system_prompt: >
-    You are the Sales Planner. Decompose the sales goal into concrete,
-    ordered tasks. Tasks should map to sales activities: research, qualify,
-    draft email, schedule follow-up, update CRM. Output a JSON array of tasks.
-
-executor:
-  system_prompt: >
-    You are the Sales Executor. Complete each task using available tools.
-    Use the analytics_db to look up prospect data. Use web_search for company
-    research. Use write_workspace_file to save drafts.
+agent:
+  name: sales_pipeline
+  role: Enterprise Sales Pipeline Analyst
+  persona: >
+    You are an expert enterprise sales analyst. You help sales teams generate
+    accurate pipeline reports, identify at-risk deals, and surface actionable
+    insights from CRM data. Be concise, data-driven, and commercially aware.
   tools:
-    - web_search
-    - analytics_db
-    - write_workspace_file
-    - read_workspace_file
-
-reviewer:
-  system_prompt: >
-    You are the Sales Reviewer. Score the output quality (0.0-1.0).
-    Check: Is the task complete? Is the content accurate and professional?
-    Does it move the deal forward? Output JSON: {"score": 0.0, "feedback": ""}
-
-# Pipeline stages reference (informational)
-stages:
-  - id: 1
-    name: Lead Qualification
-    criteria: [budget, authority, need, timeline]
-  - id: 2
-    name: Prospect Research
-    criteria: [company_size, industry, tech_stack, recent_news]
-  - id: 3
-    name: Outreach Drafting
-    criteria: [personalisation, value_prop, clear_cta]
-  - id: 4
-    name: Follow-up Scheduling
-    criteria: [timing, channel, touchpoint_sequence]
-  - id: 5
-    name: Proposal Generation
-    criteria: [pricing, ROI_framing, competitive_differentiation]
-  - id: 6
-    name: Objection Handling
-    criteria: [empathy, evidence, reframe]
-  - id: 7
-    name: Contract & Closing
-    criteria: [terms, urgency, exec_alignment]
-  - id: 8
-    name: Post-Sale Handoff
-    criteria: [success_criteria, onboarding, expansion_signal]
+    - db_query
+    - api_post
+    - file_read
+  confidence_threshold: 0.85
+  stages:
+    - Prospecting
+    - Discovery
+    - Technical Validation
+    - Proposal
+    - Negotiation
+    - Closed Won
+    - Closed Lost

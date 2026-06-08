@@ -1,42 +1,32 @@
-"""Unit tests for the reviewer's should_retry conditional edge."""
-from core.reviewer import should_retry
+"""Unit tests for reviewer routing logic."""
+from core.graph_builder import GraphBuilder
 
 
-def test_should_retry_low_score():
+def test_route_after_review_retry() -> None:
     state = {
-        "review_score": 0.5,
-        "iteration": 1,
-        "tasks": ["task1", "task2"],
-        "current_task_index": 1,
+        "review_score": 0.4,
+        "confidence_threshold": 0.85,
+        "retry_count": 1,
     }
-    assert should_retry(state) == "retry"
+    result = GraphBuilder._route_after_review(state)  # type: ignore[arg-type]
+    assert result == "retry"
 
 
-def test_should_done_high_score():
+def test_route_after_review_done_high_score() -> None:
     state = {
         "review_score": 0.9,
-        "iteration": 1,
-        "tasks": ["task1"],
-        "current_task_index": 1,
+        "confidence_threshold": 0.85,
+        "retry_count": 1,
     }
-    assert should_retry(state) == "done"
+    result = GraphBuilder._route_after_review(state)  # type: ignore[arg-type]
+    assert result == "done"
 
 
-def test_should_done_max_iterations():
+def test_route_after_review_done_max_retries() -> None:
     state = {
         "review_score": 0.3,
-        "iteration": 3,
-        "tasks": ["task1"],
-        "current_task_index": 0,
+        "confidence_threshold": 0.85,
+        "retry_count": 3,
     }
-    assert should_retry(state) == "done"
-
-
-def test_should_done_all_tasks_complete():
-    state = {
-        "review_score": 0.5,
-        "iteration": 1,
-        "tasks": ["task1", "task2"],
-        "current_task_index": 2,  # past end of tasks list
-    }
-    assert should_retry(state) == "done"
+    result = GraphBuilder._route_after_review(state)  # type: ignore[arg-type]
+    assert result == "done"

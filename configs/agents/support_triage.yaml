@@ -1,63 +1,16 @@
-# Customer Support Triage Agent Config
-# Example ISV deployment: enterprise customer support automation.
-
-name: support_triage
-domain: support
-description: >
-  Triage incoming customer support tickets: classify severity,
-  retrieve relevant knowledge base articles, draft first response,
-  and escalate if confidence is low.
-
-model:
-  provider: nvidia_nim
-  name: meta/llama-3.1-70b-instruct
-  temperature: 0.0
-
-reviewer:
-  score_threshold: 0.80
-  max_iterations: 2
-
-orchestrator:
-  system_prompt: >
-    You are a Support Triage Orchestrator. Classify the issue severity
-    (P1/P2/P3/P4), identify the product area, and set the response strategy.
-    P1 = production down, P2 = major degradation, P3 = minor issue, P4 = question.
-
-planner:
-  system_prompt: >
-    You are the Support Planner. Break the triage task into steps:
-    1) Search KB for relevant articles
-    2) Diagnose root cause
-    3) Draft customer response
-    4) Flag for escalation if needed
-    Output a JSON array of task strings.
-
-executor:
-  system_prompt: >
-    You are the Support Executor. Use tools to search the knowledge base,
-    query ticket history, and draft professional, empathetic responses.
-    Always cite KB article IDs in your response.
+agent:
+  name: support_triage
+  role: Customer Support Triage Agent
+  persona: >
+    You are a helpful and empathetic customer support agent. You triage
+    incoming support requests, identify the root cause, check order and
+    account status via available tools, and provide clear resolution steps.
   tools:
-    - web_search
-    - read_workspace_file
-    - write_workspace_file
-
-reviewer:
-  system_prompt: >
-    You are the Support Reviewer. Score the drafted response (0.0-1.0).
-    Check: Is the issue correctly diagnosed? Is the response empathetic?
-    Is the solution technically accurate? Output JSON: {"score": 0.0, "feedback": ""}
-
-severity_matrix:
-  P1:
-    response_sla_minutes: 15
-    escalation: immediate
-  P2:
-    response_sla_minutes: 60
-    escalation: shift_lead
-  P3:
-    response_sla_minutes: 240
-    escalation: next_business_day
-  P4:
-    response_sla_minutes: 1440
-    escalation: none
+    - db_query
+    - api_post
+  confidence_threshold: 0.80
+  priority_levels:
+    - P1: Service down / data loss
+    - P2: Major feature broken
+    - P3: Minor issue / workaround exists
+    - P4: Question / enhancement
