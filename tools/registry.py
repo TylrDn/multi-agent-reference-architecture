@@ -1,51 +1,59 @@
-"""Dynamic tool registry — loads tool functions by name from YAML config.
-
-Tools are registered at import time via @register_tool. The executor node
-calls get_tool(name) to retrieve the right callable without hardcoding names.
-"""
+"""Dynamic tool registry — loads tools from YAML config, returns LangChain StructuredTools."""
 from __future__ import annotations
-import logging
-from typing import Callable
 
-logger = logging.getLogger(__name__)
+import importlib
+from pathlib import Path
+from typing import Any
 
-_REGISTRY: dict[str, Callable] = {}
+import yaml
+from langchain_core.tools import StructuredTool
 
-
-def register_tool(name: str):
-    """Decorator to register a callable under a given tool name."""
-    def decorator(fn: Callable) -> Callable:
-        _REGISTRY[name] = fn
-        logger.debug(f"registry: registered tool '{name}'")
-        return fn
-    return decorator
+DEFAULT_TOOLS_CONFIG = Path(__file__).parent.parent / "configs" / "tools.yaml"
 
 
-def get_tool(name: str) -> Callable:
-    """Retrieve a registered tool by name.
+class ToolRegistry:
+    """Loads tool specs from YAML and provides a uniform invocation interface."""
 
-    Raises
-    ------
-    KeyError
-        If no tool is registered under the given name.
+    def __init__(self, tool_specs: list[dict[str, Any]] | None = None, config_path: Path = DEFAULT_TOOLS_CONFIG) -> None:
+        self._tools: dict[str, Any] = {}
+        self._langchain_tools: list[StructuredTool] = []
 
-    TODO
-    ----
-    - Auto-register all tools from tools.yaml at startup
-    - Support async tool callables (detect and await)
-    """
-    if name not in _REGISTRY:
-        available = list(_REGISTRY.keys())
-        raise KeyError(f"Tool '{name}' not found. Registered tools: {available}")
-    return _REGISTRY[name]
+        # Load from config YAML if available
+        if config_path.exists():
+            with open(config_path) as f:
+                all_tool_defs = yaml.safe_load(f) or {}
+        else:
+            all_tool_defs = {}
 
+        # Filter to only the tools requested by the agent config
+        requested = {t["name"] for t in (tool_specs or [])} if tool_specs else set(all_tool_defs.keys())
 
-def list_tools() -> list[str]:
-    """Return all registered tool names."""
-    return list(_REGISTRY.keys())
+        for name, spec in all_tool_defs.items():
+            if name not in requested:
+                continue
+            module_path = spec.get("module")
+            func_name = spec.get("function")
+            description = spec.get("description", name)
+            if module_path and func_name:
+                try:
+                    mod = importlib.import_module(module_path)
+                    fn = getattr(mod, func_name)
+                    tool = StructuredTool.from_function(fn, name=name, description=description)
+                    self._tools[name] = tool
+                    self._langchain_tools.append(tool)
+                except (ImportError, AttributeError) as e:
+                    print(f"[ToolRegistry] Could not load tool '{name}': {e}")
 
+    def has(self, name: str) -> bool:
+        return name in self._tools
 
-# ── Auto-import tool modules so @register_tool decorators fire ──────────────
-import tools.api_node   # noqa: E402, F401
-import tools.db_node    # noqa: E402, F401
-import tools.file_node  # noqa: E402, F401
+    def invoke(self, name: str, args: dict[str, Any]) -> Any:
+        if not self.has(name):
+            raise ValueError(f"Tool '{name}' not in registry")
+        return self._tools[name].invoke(args)
+
+    def get_langchain_tools(self) -> list[StructuredTool]:
+        return self._langchain_tools
+
+    def list_tools(self) -> list[str]:
+        return list(self._tools.keys())

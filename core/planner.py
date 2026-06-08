@@ -1,69 +1,76 @@
-"""Planner node — decomposes the user goal into an ordered task list.
-
-Responsibility
---------------
-Calls the configured LLM with a structured prompt to produce a JSON task list.
-Each task specifies which tool to invoke and what parameters to pass.
-The task list is written into state.tasks for the Executor to consume.
-"""
+"""Planner node — decomposes intent into an ordered task list."""
 from __future__ import annotations
+
 import json
-import logging
 import os
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
+
 from state.schema import AgentState
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
-PLANNER_SYSTEM_PROMPT = """\
-You are a precise task planner. Given a user goal, decompose it into an ordered
-list of atomic tasks. Each task must specify:
-- id: unique string
-- description: what to do
-- tool: one of the available tools
-- params: dict of parameters for that tool
+PLANNER_PROMPT = """\
+You are a planning agent. Given a goal and the available tools, decompose the goal
+into an ordered list of discrete, executable tasks. Each task should be achievable
+by a single tool call.
 
-Respond with ONLY valid JSON — a list of task objects. No markdown, no prose.
+Available tools: {tools}
+
+Goal: {intent}
+
+Respond with a JSON array of task objects, each with:
+  - "id": integer (1-indexed)
+  - "description": string
+  - "tool": string (tool name from the available list, or "none")
+  - "args": dict of arguments for the tool
+
+Example: [{"id": 1, "description": "Fetch customer data", "tool": "db_query", "args": {"table": "customers"}}]
 """
 
 
-def planner_node(state: AgentState) -> dict:
-    """Call LLM to decompose state['goal'] into state['tasks'].
+class Planner:
+    """Produces an ordered task list from the orchestrator's intent."""
 
-    Parameters
-    ----------
-    state : AgentState
-        Must contain 'goal' and optionally 'metadata.available_tools'.
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        model = config.get("model", "meta/llama-3.1-70b-instruct")
+        self.tools = [t["name"] for t in config.get("tools", [])]
+        self.llm = ChatOpenAI(
+            model=model,
+            openai_api_base=NIM_BASE_URL,
+            openai_api_key=NIM_API_KEY,
+            temperature=0.0,
+        )
 
-    Returns
-    -------
-    dict
-        State patch: {"tasks": list[dict]}
+    def run(self, state: AgentState) -> AgentState:
+        intent = state.get("intent", state["goal"])
+        prompt = PLANNER_PROMPT.format(
+            tools=json.dumps(self.tools),
+            intent=intent,
+        )
+        messages = [HumanMessage(content=prompt)]
+        response = self.llm.invoke(messages)
 
-    TODO
-    ----
-    - Inject available_tools list from tool registry into system prompt
-    - Bind LLM from agent config (model, temperature, max_tokens)
-    - Add Langfuse generation span with input/output tokens
-    - Handle JSON parse errors with retry + structured output fallback
-    """
-    llm = ChatOpenAI(
-        base_url=os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
-        api_key=os.getenv("NVIDIA_API_KEY"),
-        model=os.getenv("DEFAULT_MODEL", "meta/llama3-70b-instruct"),
-        temperature=0.0,
-    )
+        try:
+            raw = response.content.strip()
+            # Strip markdown code blocks if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            tasks = json.loads(raw.strip())
+        except (json.JSONDecodeError, IndexError):
+            tasks = [{"id": 1, "description": intent, "tool": "none", "args": {}}]
 
-    messages = [
-        SystemMessage(content=PLANNER_SYSTEM_PROMPT),
-        HumanMessage(content=f"Goal: {state['goal']}"),
-    ]
-
-    response = llm.invoke(messages)
-    logger.info(f"planner: raw response length={len(response.content)}")
-
-    # TODO: replace bare json.loads with structured output / retry logic
-    tasks = json.loads(response.content)
-    logger.info(f"planner: produced {len(tasks)} tasks")
-    return {"tasks": tasks}
+        return {
+            **state,
+            "tasks": tasks,
+            "current_task_index": 0,
+            "task_results": [],
+            "retry_count": 0,
+            "messages": state.get("messages", []) + [response],
+        }

@@ -1,42 +1,51 @@
 # Sales Pipeline Agent Config
-# Generalized from the WatsonX 8-stage competition pipeline.
-# Maps the OPER pattern to an enterprise B2B sales qualification workflow.
+# Generalized from the 8-stage WatsonX competition architecture
+# OPER pattern: Orchestrator -> Planner -> Executor -> Reviewer
 
 name: sales_pipeline
-description: "8-stage B2B sales qualification and outreach pipeline"
-model: meta/llama3-70b-instruct
-temperature: 0.2
-max_retries: 2
-pass_threshold: 0.75
+description: "8-stage B2B sales pipeline agent — prospect qualification to close."
+model: meta/llama-3.1-70b-instruct
+
+orchestrator:
+  persona: |
+    You are a senior sales orchestration AI. Your role is to coordinate a
+    multi-stage B2B sales pipeline. You receive a sales goal and ensure
+    it is broken down into the correct sequence of pipeline stages.
+
+reviewer:
+  score_threshold: 0.75
+  max_retries: 2
 
 tools:
-  - api_get
-  - api_post
-  - db_query
-  - file_read
-  - file_write
+  - name: db_query
+    description: "Query CRM database for prospect, opportunity, and account data."
+  - name: api_get
+    description: "Fetch external enrichment data (LinkedIn, Clearbit, etc.)."
+  - name: file_write
+    description: "Write sales artifacts (proposals, call summaries) to disk."
 
-stages:
-  - id: prospect_research
-    description: "Enrich company and contact data from external sources"
-    tool: api_get
-  - id: icp_score
-    description: "Score account against Ideal Customer Profile criteria"
-    tool: db_query
-  - id: pain_hypothesis
-    description: "Generate pain point hypotheses based on company profile"
-    tool: api_post
-  - id: outreach_draft
-    description: "Draft personalised outreach email or LinkedIn message"
-    tool: file_write
-  - id: sequence_enroll
-    description: "Enroll contact into CRM outreach sequence via API"
-    tool: api_post
-
-persona:
-  role: "Senior Enterprise Account Executive"
-  tone: "Professional, concise, insight-led"
-  constraints:
-    - "Never make claims without citing a data source"
-    - "Keep outreach under 150 words"
-    - "Always reference a specific pain point"
+pipeline_stages:
+  - id: 1
+    name: prospect_qualification
+    description: "Evaluate whether the prospect meets ICP criteria."
+  - id: 2
+    name: discovery
+    description: "Identify prospect pain points and business objectives."
+  - id: 3
+    name: solution_mapping
+    description: "Map NVIDIA solutions to identified pain points."
+  - id: 4
+    name: technical_validation
+    description: "Confirm technical fit and architecture compatibility."
+  - id: 5
+    name: business_case
+    description: "Build ROI model and quantify business value."
+  - id: 6
+    name: proposal
+    description: "Draft and deliver a tailored solution proposal."
+  - id: 7
+    name: negotiation
+    description: "Handle objections and finalize commercial terms."
+  - id: 8
+    name: close
+    description: "Confirm agreement and hand off to implementation."

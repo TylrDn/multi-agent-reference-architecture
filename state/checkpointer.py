@@ -1,37 +1,21 @@
-"""LangGraph checkpointer factory — memory, Postgres, or Redis backends."""
+"""LangGraph checkpointer factory — in-memory for dev, Postgres for prod."""
 from __future__ import annotations
+
 import os
-import logging
+from typing import Literal
+
 from langgraph.checkpoint.memory import MemorySaver
 
-logger = logging.getLogger(__name__)
+CHECKPOINT_BACKEND = os.getenv("CHECKPOINT_BACKEND", "memory")  # "memory" | "postgres"
 
 
-def get_checkpointer():
-    """Return a LangGraph checkpointer based on CHECKPOINTER_BACKEND env var.
-
-    Backends
-    --------
-    memory   (default) — in-process MemorySaver, no persistence across restarts.
-    postgres — SqliteSaver / AsyncPostgresSaver (requires DATABASE_URL).
-    redis    — RedisSaver (requires REDIS_URL).
-
-    TODO: Implement postgres and redis branches.
-    """
-    backend = os.getenv("CHECKPOINTER_BACKEND", "memory")
-    logger.info(f"checkpointer: using backend='{backend}'")
-
-    if backend == "memory":
-        return MemorySaver()
-
+def get_checkpointer(backend: Literal["memory", "postgres"] = CHECKPOINT_BACKEND):
+    """Return a LangGraph checkpointer for the given backend."""
     if backend == "postgres":
-        # TODO: from langgraph.checkpoint.postgres import AsyncPostgresSaver
-        # return AsyncPostgresSaver.from_conn_string(os.environ["DATABASE_URL"])
-        raise NotImplementedError("postgres checkpointer not yet implemented")
-
-    if backend == "redis":
-        # TODO: from langgraph.checkpoint.redis import RedisSaver
-        # return RedisSaver.from_conn_string(os.environ["REDIS_URL"])
-        raise NotImplementedError("redis checkpointer not yet implemented")
-
-    raise ValueError(f"Unknown CHECKPOINTER_BACKEND: '{backend}'")
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+            conn_str = os.getenv("CHECKPOINT_POSTGRES_URL", "postgresql://agent:agent@localhost:5432/agentdb")
+            return PostgresSaver.from_conn_string(conn_str)
+        except ImportError:
+            print("[checkpointer] langgraph-checkpoint-postgres not installed; falling back to memory")
+    return MemorySaver()

@@ -1,51 +1,45 @@
-"""Orchestrator node — top-level router that delegates to sub-agents.
-
-Responsibility
---------------
-Receives the raw user goal, validates it, enriches metadata with run context
-(agent config name, run ID, timestamp), and routes to the Planner.
-In multi-agent deployments this node may dispatch to specialised sub-graphs.
-"""
+"""Orchestrator node — top-level router that frames the goal and delegates."""
 from __future__ import annotations
-import logging
-import uuid
-from datetime import datetime, timezone
+
+import os
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+
 from state.schema import AgentState
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 
-def orchestrator_node(state: AgentState) -> dict:
-    """Validate goal, stamp metadata, and pass through to Planner.
+class Orchestrator:
+    """Receives the raw user goal and emits a structured intent for the Planner."""
 
-    Parameters
-    ----------
-    state : AgentState
-        Incoming graph state.
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.persona = config.get("orchestrator", {}).get("persona", "You are a helpful orchestrator agent.")
+        model = config.get("model", "meta/llama-3.1-70b-instruct")
+        self.llm = ChatOpenAI(
+            model=model,
+            openai_api_base=NIM_BASE_URL,
+            openai_api_key=NIM_API_KEY,
+            temperature=0.0,
+        )
 
-    Returns
-    -------
-    dict
-        State patch: enriched metadata and initialised tasks/results lists.
-
-    TODO
-    ----
-    - Load agent config from state.metadata["config_path"] and bind LLM
-    - Implement intent classification to route to specialised sub-graphs
-    - Add Langfuse span for orchestrator latency tracing
-    """
-    logger.info(f"orchestrator: received goal='{state['goal'][:80]}'")
-
-    run_id = str(uuid.uuid4())
-    return {
-        "tasks": [],
-        "results": [],
-        "review_score": None,
-        "retry_count": 0,
-        "final_output": None,
-        "metadata": {
-            **state.get("metadata", {}),
-            "run_id": run_id,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        },
-    }
+    def run(self, state: AgentState) -> AgentState:
+        goal = state["goal"]
+        messages = [
+            SystemMessage(content=self.persona),
+            HumanMessage(content=(
+                f"Goal: {goal}\n\n"
+                "Acknowledge the goal, identify the high-level intent, and pass it along. "
+                "Output only the structured intent as a single sentence."
+            )),
+        ]
+        response = self.llm.invoke(messages)
+        return {
+            **state,
+            "intent": response.content.strip(),
+            "messages": state.get("messages", []) + [response],
+        }

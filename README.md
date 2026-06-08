@@ -1,84 +1,124 @@
 # multi-agent-reference-architecture
 
-> Generalizable **Orchestrator → Planner → Executor → Reviewer** (OPER) multi-agent pattern using LangGraph. Plug-and-play tool nodes with YAML-configurable agent personas — designed as a reusable blueprint for enterprise ISV agentic AI deployments.
+[![CI](https://github.com/TylrDn/multi-agent-reference-architecture/actions/workflows/ci.yml/badge.svg)](https://github.com/TylrDn/multi-agent-reference-architecture/actions/workflows/ci.yml)
 
-[![CI](https://github.com/TylrDn/multi-agent-reference-architecture/actions/workflows/ci.yml/badge.svg)](https://github.com/TylrDn/multi-agent-reference-architecture/actions)
+A generalizable **OPER pattern** (Orchestrator → Planner → Executor → Reviewer) reference
+architecture for enterprise multi-agent AI systems. Built on **LangGraph** and **NVIDIA NIM** —
+designed as a reusable blueprint that ISV partner engineering teams can adapt to any domain
+via a single YAML config, with no Python changes required.
 
-## Overview
+## Why OPER?
 
-This repo implements a **domain-agnostic multi-agent orchestration pattern** that maps any business workflow to four composable roles:
-
-| Role | Responsibility |
-|---|---|
-| **Orchestrator** | Top-level router — receives user goal, delegates to sub-agents |
-| **Planner** | Decomposes goal into ordered task list |
-| **Executor** | Runs tool calls per task, returns structured results |
-| **Reviewer** | Scores output quality; routes to retry or terminate |
-
-Swap domain configs in `configs/agents/*.yaml` — no Python changes required.
-
-## Quick Start
-
-```bash
-cp .env.template .env   # fill in your API keys
-pip install -r requirements.txt
-python examples/run_sales_pipeline.py
-```
-
-Or with Docker:
-
-```bash
-docker compose up
-```
+Most agentic AI POCs are hardcoded to one domain. OPER separates **what to do** (YAML config)
+from **how to do it** (graph execution) — so the same orchestration engine runs sales pipelines,
+support triage, and data analytics without touching Python.
 
 ## Architecture
 
-See [`docs/architecture.md`](docs/architecture.md) for the full Mermaid OPER diagram.
-
-## Repo Structure
-
 ```
-multi-agent-reference-architecture/
-├── core/
-│   ├── graph_builder.py      # Assembles LangGraph from YAML agent config
-│   ├── orchestrator.py       # Top-level router — delegates to sub-agents
-│   ├── planner.py            # Breaks goal into ordered task list
-│   ├── executor.py           # Runs tool calls per task
-│   └── reviewer.py           # Scores output; routes to retry or terminate
-├── tools/
-│   ├── api_node.py           # Generic REST tool node
-│   ├── db_node.py            # SQL query tool node
-│   ├── file_node.py          # File I/O tool node
-│   └── registry.py           # Dynamic tool loader from YAML config
-├── configs/
-│   ├── agents/
-│   │   ├── sales_pipeline.yaml
-│   │   ├── support_triage.yaml
-│   │   └── data_analyst.yaml
-│   └── tools.yaml
-├── state/
-│   ├── schema.py             # TypedDict state definitions
-│   └── checkpointer.py       # LangGraph memory / persistence
-├── examples/
-│   ├── run_sales_pipeline.py
-│   └── run_support_triage.py
-├── evals/
-│   └── pipeline_eval.py
-├── deploy/
-│   ├── docker-compose.yml
-│   └── k8s/
-├── docs/
-│   ├── architecture.md
-│   └── isv-customization.md
-└── README.md
+User Goal
+    ↓
+Orchestrator  (frames intent)
+    ↓
+Planner       (decomposes into ordered tasks)
+    ↓
+Executor      (runs tool calls per task)
+    ↓
+Reviewer      (scores output → terminate or retry)
+    ↓
+Final Answer
 ```
 
-## Cross-Repo Conventions
+See [docs/architecture.md](docs/architecture.md) for the full Mermaid diagram.
 
-- **Secrets:** `python-dotenv` + `.env.template` — never commit real values
-- **Observability:** Langfuse tracing on all LLM call paths
-- **CI/CD:** GitHub Actions — `ruff`, `mypy`, `pytest` on push
-- **Containers:** `docker-compose.yml` with health checks
-- **State:** LangGraph `TypedDict` state definitions
-- **Docs:** `docs/architecture.md` with Mermaid diagram
-- **Python:** 3.11+
+## Quickstart
+
+```bash
+git clone https://github.com/TylrDn/multi-agent-reference-architecture.git
+cd multi-agent-reference-architecture
+pip install -r requirements.txt
+cp .env.template .env
+# Add NVIDIA_API_KEY to .env
+
+python -m examples.run_sales_pipeline
+```
+
+## Three Included Domain Configs
+
+| Config | Domain | Description |
+|---|---|---|
+| `sales_pipeline.yaml` | B2B Sales | 8-stage qualification → close pipeline |
+| `support_triage.yaml` | Customer Support | Severity triage + escalation routing |
+| `data_analyst.yaml` | Analytics | SQL → interpret → executive summary |
+
+## Add Your Own Domain (< 30 min)
+
+```yaml
+# configs/agents/my_domain.yaml
+name: my_domain
+model: meta/llama-3.1-70b-instruct
+orchestrator:
+  persona: "You are an expert in [your domain]..."
+reviewer:
+  score_threshold: 0.75
+  max_retries: 2
+tools:
+  - name: db_query
+  - name: api_get
+```
+
+Then: `python -m examples.run_sales_pipeline` (swap config name). No Python changes.
+
+See [docs/isv-customization.md](docs/isv-customization.md) for the full guide.
+
+## API
+
+```bash
+uvicorn api.server:app --reload --port 8082
+
+# List available configs
+curl http://localhost:8082/configs
+
+# Run an agent
+curl -X POST http://localhost:8082/run \
+  -H 'Content-Type: application/json' \
+  -d '{"goal": "Qualify Acme Corp as an NVIDIA customer", "config_name": "sales_pipeline"}'
+```
+
+## Docker
+
+```bash
+cd deploy && docker-compose up --build
+```
+
+## Key Components
+
+| File | Purpose |
+|---|---|
+| `core/graph_builder.py` | Assembles LangGraph from YAML config |
+| `core/orchestrator.py` | Frames user goal as structured intent |
+| `core/planner.py` | Decomposes intent into ordered task list |
+| `core/executor.py` | Runs tool calls, falls back to LLM reasoning |
+| `core/reviewer.py` | Scores output, routes to retry or terminate |
+| `state/schema.py` | TypedDict state shared across all nodes |
+| `tools/registry.py` | Dynamic tool loader from YAML |
+| `evals/pipeline_eval.py` | LangSmith + keyword eval harness |
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `NVIDIA_API_KEY` | NVIDIA NIM API key |
+| `NIM_BASE_URL` | NIM endpoint |
+| `CHECKPOINT_BACKEND` | `memory` (dev) or `postgres` (prod) |
+| `LANGSMITH_API_KEY` | LangSmith tracing |
+
+## Cross-Repo Integration
+
+- [`nvidia-nim-agent-toolkit`](https://github.com/TylrDn/nvidia-nim-agent-toolkit) — NIM-specialized agents plug in as Executor tool nodes
+- [`enterprise-rag-pipeline`](https://github.com/TylrDn/enterprise-rag-pipeline) — RAG `/query` endpoint registers as a tool
+- [`agentic-guardrails-eval`](https://github.com/TylrDn/agentic-guardrails-eval) — `/run` endpoint is a red-team test target
+
+## Topics
+
+`multi-agent` `langgraph` `reference-architecture` `agent-orchestration` `enterprise-ai` `python` `yaml-config` `nvidia-nim` `agentic-patterns` `oper`

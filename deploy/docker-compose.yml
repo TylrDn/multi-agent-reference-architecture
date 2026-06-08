@@ -2,36 +2,45 @@ version: "3.9"
 
 services:
   agent:
-    build: .
-    env_file: .env
-    command: python examples/run_sales_pipeline.py
-    volumes:
-      - .:/app
-    working_dir: /app
-    depends_on:
-      postgres:
-        condition: service_healthy
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: multi-agent-reference-architecture:latest
+    container_name: oper-agent
+    ports:
+      - "8082:8082"
+    environment:
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - NIM_BASE_URL=${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - CHECKPOINT_BACKEND=${CHECKPOINT_BACKEND:-memory}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./agent_demo.db}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=true
+      - LANGCHAIN_PROJECT=multi-agent-reference-architecture
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
+    container_name: postgres-agent
     environment:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: agent
       POSTGRES_DB: agentdb
     ports:
-      - "5432:5432"
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    profiles: ["postgres"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U agent -d agentdb"]
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+volumes:
+  pgdata:

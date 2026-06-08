@@ -1,40 +1,27 @@
 # Tool capability registry
-# Describes available tools, their input schemas, and which agent configs may use them.
-# Used by graph_builder.py to validate tool bindings at startup.
+# Each tool maps a name to a Python module + function for dynamic loading
 
-tools:
-  api_get:
-    description: "HTTP GET request — returns parsed JSON"
-    inputs:
-      url: string
-      params: object (optional)
-      headers: object (optional)
-    safe: true
+api_get:
+  module: tools.api_node
+  function: api_get
+  description: "Perform an HTTP GET request to a URL and return the response body."
 
-  api_post:
-    description: "HTTP POST request with JSON body — returns parsed JSON"
-    inputs:
-      url: string
-      body: object (optional)
-      headers: object (optional)
-    safe: false  # mutates external state
+api_post:
+  module: tools.api_node
+  function: api_post
+  description: "Perform an HTTP POST request with a JSON payload."
 
-  db_query:
-    description: "Read-only SQL SELECT query — returns list of row dicts"
-    inputs:
-      sql: string
-      params: object (optional)
-    safe: true
+db_query:
+  module: tools.db_node
+  function: db_query
+  description: "Execute a read-only SQL SELECT query and return formatted results."
 
-  file_read:
-    description: "Read UTF-8 text file — returns string contents"
-    inputs:
-      path: string
-    safe: true
+file_read:
+  module: tools.file_node
+  function: file_read
+  description: "Read a text file from the agent sandbox directory."
 
-  file_write:
-    description: "Write UTF-8 text file — returns path and bytes written"
-    inputs:
-      path: string
-      content: string
-    safe: false  # mutates filesystem
+file_write:
+  module: tools.file_node
+  function: file_write
+  description: "Write text content to a file in the agent sandbox directory."

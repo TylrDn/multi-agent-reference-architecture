@@ -1,56 +1,35 @@
-"""SQL query tool node — executes read-only queries via SQLAlchemy.
-
-Registered tool names
----------------------
-- ``db_query`` — execute a SELECT statement and return rows as list of dicts
-"""
+"""SQL query tool node — schema-safe, read-only by default."""
 from __future__ import annotations
-import logging
-import os
-from sqlalchemy import create_engine, text
-from tools.registry import register_tool
 
-logger = logging.getLogger(__name__)
+import os
+
+from sqlalchemy import create_engine, text
+
+DB_URL = os.getenv("DATABASE_URL", "sqlite:///./agent_demo.db")
+_engine = None
 
 
 def _get_engine():
-    """Lazy engine factory — reads DATABASE_URL from environment."""
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise EnvironmentError("DATABASE_URL is not set")
-    return create_engine(url)
+    global _engine
+    if _engine is None:
+        _engine = create_engine(DB_URL)
+    return _engine
 
 
-@register_tool("db_query")
-def db_query(sql: str, params: dict | None = None) -> list[dict]:
-    """Run a read-only SQL query and return results as a list of row dicts.
-
-    Parameters
-    ----------
-    sql : str
-        SQL SELECT statement. Never used for DDL/DML — safety enforced by
-        checking that the statement starts with SELECT.
-    params : dict, optional
-        Bind parameters for the query.
-
-    Returns
-    -------
-    list[dict]
-        Each row as a dict keyed by column name.
-
-    TODO
-    ----
-    - Add row count limit to prevent accidental full-table scans
-    - Support async engine (asyncpg)
-    - Wrap in read-only transaction for safety
-    """
-    if not sql.strip().upper().startswith("SELECT"):
-        raise ValueError("db_query only permits SELECT statements")
-
-    engine = _get_engine()
-    logger.info(f"db_query: executing sql='{sql[:80]}'")
-    with engine.connect() as conn:
-        result = conn.execute(text(sql), params or {})
-        rows = [dict(row._mapping) for row in result]
-    logger.info(f"db_query: returned {len(rows)} rows")
-    return rows
+def db_query(sql: str) -> str:
+    """Execute a read-only SQL query and return results as a formatted string."""
+    if any(kw in sql.upper() for kw in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"]):
+        return "ERROR: Only SELECT queries are permitted."
+    try:
+        with _get_engine().connect() as conn:
+            result = conn.execute(text(sql))
+            rows = result.fetchall()
+            keys = list(result.keys())
+            if not rows:
+                return "No results."
+            header = " | ".join(keys)
+            lines = [header, "-" * len(header)]
+            lines += [" | ".join(str(v) for v in row) for row in rows]
+            return "\n".join(lines)
+    except Exception as e:
+        return f"ERROR: {e}"

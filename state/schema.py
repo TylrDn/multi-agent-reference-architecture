@@ -1,38 +1,39 @@
-"""LangGraph TypedDict state schema for the OPER multi-agent pattern."""
-from typing import Annotated, Any, Optional
+"""TypedDict state schema for the OPER multi-agent pattern."""
+from __future__ import annotations
+
+from typing import Any, Optional
 from typing_extensions import TypedDict
-from langgraph.graph.message import add_messages
+from langchain_core.messages import BaseMessage
 
 
-class AgentState(TypedDict):
-    """Shared state passed between all nodes in the OPER graph.
+class AgentState(TypedDict, total=False):
+    """Shared state propagated through all OPER graph nodes."""
 
-    Fields
-    ------
-    goal : str
-        Original user goal or task description.
-    tasks : list[dict]
-        Ordered task list produced by the Planner node.
-        Each task: {"id": str, "description": str, "tool": str, "params": dict}
-    results : list[dict]
-        Accumulated results from Executor runs.
-        Each result: {"task_id": str, "output": Any, "success": bool, "error": str | None}
-    review_score : float | None
-        Quality score from Reviewer (0.0–1.0). None until first review.
-    retry_count : int
-        Number of retry iterations so far.
-    final_output : str | None
-        Synthesized final answer once Reviewer approves.
-    messages : list
-        LangGraph message history (append-only via add_messages reducer).
-    metadata : dict
-        Arbitrary key-value bag for domain-specific context (agent config name, run ID, etc.).
-    """
-    goal: str
-    tasks: list[dict[str, Any]]
-    results: list[dict[str, Any]]
-    review_score: Optional[float]
+    # Input
+    goal: str                          # Original user goal — immutable
+    session_id: str                    # Unique run identifier
+    config_name: str                   # Agent config YAML name
+
+    # Orchestrator outputs
+    intent: str                        # Structured intent extracted from goal
+
+    # Planner outputs
+    tasks: list[dict[str, Any]]        # Ordered task list [{id, description, tool, args}]
+    current_task_index: int            # Index of task being executed
+
+    # Executor outputs
+    task_results: list[dict[str, Any]] # [{task_id, description, tool, result}]
+    executor_complete: bool            # True when all tasks processed
+
+    # Reviewer outputs
+    reviewer_decision: str             # "terminate" | "retry"
+    reviewer_score: float              # 0.0 – 1.0
+    reviewer_reasoning: str
+    final_answer: str                  # Synthesized answer (on terminate)
+
+    # Loop control
     retry_count: int
-    final_output: Optional[str]
-    messages: Annotated[list, add_messages]
-    metadata: dict[str, Any]
+    max_retries: int
+
+    # Message history (for tracing / LangSmith)
+    messages: list[BaseMessage]

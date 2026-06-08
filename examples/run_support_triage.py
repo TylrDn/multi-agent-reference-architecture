@@ -1,31 +1,45 @@
-"""Example: run the support triage agent against a sample inbound ticket."""
-import logging
-from dotenv import load_dotenv
-from core.graph_builder import build_graph
+"""Example: Run the support triage agent against an inbound ticket."""
+from __future__ import annotations
 
-logging.basicConfig(level=logging.INFO)
+import os
+import uuid
+
+from dotenv import load_dotenv
+
 load_dotenv()
+
+from core.graph_builder import build_graph
+from state.schema import AgentState
 
 
 def main():
-    graph = build_graph("configs/agents/support_triage.yaml")
+    graph = build_graph("support_triage")
 
-    initial_state = {
-        "goal": "Customer reports they were double-charged on their last invoice and are threatening to cancel.",
-        "tasks": [],
-        "results": [],
-        "review_score": None,
-        "retry_count": 0,
-        "final_output": None,
+    initial_state: AgentState = {
+        "goal": (
+            "Ticket #84721: Customer reports they cannot log in to their NVIDIA NGC account. "
+            "Error message: 'Account suspended.' Account email: user@enterprise.com. "
+            "This is blocking their entire team from accessing GPU compute resources."
+        ),
+        "session_id": str(uuid.uuid4()),
+        "config_name": "support_triage",
+        "max_retries": 2,
         "messages": [],
-        "metadata": {"config_path": "configs/agents/support_triage.yaml"},
+        "task_results": [],
+        "retry_count": 0,
     }
 
-    config = {"configurable": {"thread_id": "support-demo-001"}}
-    result = graph.invoke(initial_state, config)
+    config = {"configurable": {"thread_id": initial_state["session_id"]}}
+    final_state = graph.invoke(initial_state, config=config)
 
-    print("\n── Triage Response ──────────────────────────────────")
-    print(result.get("final_output", "(no output)"))
+    print("\n" + "="*60)
+    print("SUPPORT TRIAGE RESULT")
+    print("="*60)
+    print(f"Intent:    {final_state.get('intent', 'N/A')}")
+    print(f"Score:     {final_state.get('reviewer_score', 'N/A')}")
+    print(f"Decision:  {final_state.get('reviewer_decision', 'N/A')}")
+    print("\nFinal Answer:")
+    print(final_state.get("final_answer", "[No answer generated]"))
 
 
 if __name__ == "__main__":

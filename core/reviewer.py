@@ -1,86 +1,81 @@
-"""Reviewer node — scores executor output and decides retry vs. done.
-
-Responsibility
---------------
-Calls the LLM to evaluate output quality against the original goal.
-Produces a numeric score (0.0–1.0) and writes it to state['review_score'].
-The conditional edge function `should_retry` uses this score to route the graph.
-"""
+"""Reviewer node — scores executor output and decides: terminate or retry."""
 from __future__ import annotations
-import logging
+
+import json
 import os
+from typing import Any
+
+from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage, SystemMessage
+
 from state.schema import AgentState
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
-MAX_RETRIES = 2
-PASS_THRESHOLD = 0.7
+REVIEWER_PROMPT = """\
+You are a reviewer agent. Evaluate whether the task results satisfy the original goal.
 
-REVIEWER_SYSTEM_PROMPT = """\
-You are a strict quality reviewer. Given an original goal and a set of task results,
-score the overall output quality from 0.0 (completely wrong) to 1.0 (perfect).
-Respond with ONLY a JSON object: {"score": <float>, "rationale": "<one sentence>"}
+Original goal: {goal}
+
+Task results:
+{results}
+
+Respond with a JSON object:
+{{
+  "score": 0.0-1.0,
+  "decision": "terminate" | "retry",
+  "reasoning": "brief explanation",
+  "final_answer": "synthesized answer if decision is terminate, else empty string"
+}}
+
+Use "retry" only if critical information is missing or a tool call failed. Default to "terminate".
 """
 
 
-def reviewer_node(state: AgentState) -> dict:
-    """Score the executor results against the original goal.
+class Reviewer:
+    """Scores the executor's output and routes the graph to retry or terminate."""
 
-    Parameters
-    ----------
-    state : AgentState
-        Must contain 'goal' and 'results'.
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.score_threshold = config.get("reviewer", {}).get("score_threshold", 0.7)
+        model = config.get("model", "meta/llama-3.1-70b-instruct")
+        self.llm = ChatOpenAI(
+            model=model,
+            openai_api_base=NIM_BASE_URL,
+            openai_api_key=NIM_API_KEY,
+            temperature=0.0,
+        )
 
-    Returns
-    -------
-    dict
-        State patch: {"review_score": float, "retry_count": int, "final_output": str | None}
+    def run(self, state: AgentState) -> AgentState:
+        goal = state["goal"]
+        results = json.dumps(state.get("task_results", []), indent=2)
+        retry_count = state.get("retry_count", 0)
 
-    TODO
-    ----
-    - Parse structured output instead of bare json.loads
-    - Emit Langfuse score event tied to the generation trace
-    - Support configurable PASS_THRESHOLD and MAX_RETRIES from agent YAML
-    """
-    import json
-    llm = ChatOpenAI(
-        base_url=os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
-        api_key=os.getenv("NVIDIA_API_KEY"),
-        model=os.getenv("DEFAULT_MODEL", "meta/llama3-70b-instruct"),
-        temperature=0.0,
-    )
+        prompt = REVIEWER_PROMPT.format(goal=goal, results=results)
+        response = self.llm.invoke([HumanMessage(content=prompt)])
 
-    results_summary = str(state["results"])[:2000]
-    messages = [
-        SystemMessage(content=REVIEWER_SYSTEM_PROMPT),
-        HumanMessage(content=f"Goal: {state['goal']}\n\nResults: {results_summary}"),
-    ]
+        try:
+            raw = response.content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            review = json.loads(raw.strip())
+        except (json.JSONDecodeError, IndexError):
+            review = {"score": 1.0, "decision": "terminate", "reasoning": "parse error", "final_answer": ""}
 
-    response = llm.invoke(messages)
-    parsed = json.loads(response.content)
-    score = float(parsed.get("score", 0.0))
-    rationale = parsed.get("rationale", "")
-    retry_count = state.get("retry_count", 0)
+        decision = review.get("decision", "terminate")
+        score = float(review.get("score", 1.0))
+        if score < self.score_threshold:
+            decision = "retry"
 
-    logger.info(f"reviewer: score={score:.2f} rationale='{rationale}' retry={retry_count}")
-
-    final_output = None
-    if score >= PASS_THRESHOLD:
-        final_output = results_summary  # TODO: synthesise a proper answer from results
-
-    return {
-        "review_score": score,
-        "retry_count": retry_count + 1,
-        "final_output": final_output,
-    }
-
-
-def should_retry(state: AgentState) -> str:
-    """Conditional edge: return 'retry' or 'done' based on review score and retry count."""
-    score = state.get("review_score", 0.0)
-    retries = state.get("retry_count", 0)
-    if score >= PASS_THRESHOLD or retries >= MAX_RETRIES:
-        return "done"
-    return "retry"
+        return {
+            **state,
+            "reviewer_decision": decision,
+            "reviewer_score": score,
+            "reviewer_reasoning": review.get("reasoning", ""),
+            "final_answer": review.get("final_answer", ""),
+            "retry_count": retry_count + (1 if decision == "retry" else 0),
+            "messages": state.get("messages", []) + [response],
+        }

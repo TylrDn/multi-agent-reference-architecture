@@ -1,53 +1,65 @@
-"""Executor node — runs tool calls for each task in state['tasks'].
-
-Responsibility
---------------
-Iterates over the task list, dispatches each task to the correct tool node
-via the tool registry, and accumulates structured results into state['results'].
-Partial failures are captured per-task (success=False) without halting the run.
-"""
+"""Executor node — runs tool calls for the current task in the plan."""
 from __future__ import annotations
-import logging
-from tools.registry import get_tool
+
+import os
+from typing import Any
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+
 from state.schema import AgentState
+from tools.registry import ToolRegistry
 
-logger = logging.getLogger(__name__)
+NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 
 
-def executor_node(state: AgentState) -> dict:
-    """Execute all tasks in state['tasks'] and collect results.
+class Executor:
+    """Runs tool calls for each task in the plan, appends results to state."""
 
-    Parameters
-    ----------
-    state : AgentState
-        Must contain 'tasks' list from Planner output.
+    def __init__(self, tool_registry: ToolRegistry, config: dict[str, Any]) -> None:
+        self.registry = tool_registry
+        self.config = config
+        model = config.get("model", "meta/llama-3.1-70b-instruct")
+        self.llm = ChatOpenAI(
+            model=model,
+            openai_api_base=NIM_BASE_URL,
+            openai_api_key=NIM_API_KEY,
+            temperature=0.0,
+        ).bind_tools(self.registry.get_langchain_tools())
 
-    Returns
-    -------
-    dict
-        State patch: {"results": list[dict]}
+    def run(self, state: AgentState) -> AgentState:
+        tasks = state.get("tasks", [])
+        idx = state.get("current_task_index", 0)
+        task_results = list(state.get("task_results", []))
 
-    TODO
-    ----
-    - Support async parallel execution for independent tasks
-    - Bind Langfuse span per tool call with latency + token tracking
-    - Implement per-task timeout with configurable deadline
-    - Add tool call history to state.messages for LLM context window
-    """
-    results = []
-    for task in state["tasks"]:
-        task_id = task.get("id", "unknown")
-        tool_name = task.get("tool", "")
-        params = task.get("params", {})
-        logger.info(f"executor: running task_id='{task_id}' tool='{tool_name}'")
+        if idx >= len(tasks):
+            return {**state, "executor_complete": True}
 
-        try:
-            tool_fn = get_tool(tool_name)
-            output = tool_fn(**params)
-            results.append({"task_id": task_id, "output": output, "success": True, "error": None})
-        except Exception as exc:
-            logger.warning(f"executor: task_id='{task_id}' failed — {exc}")
-            results.append({"task_id": task_id, "output": None, "success": False, "error": str(exc)})
+        task = tasks[idx]
+        tool_name = task.get("tool", "none")
+        args = task.get("args", {})
 
-    logger.info(f"executor: {sum(r['success'] for r in results)}/{len(results)} tasks succeeded")
-    return {"results": results}
+        if tool_name != "none" and self.registry.has(tool_name):
+            try:
+                result = self.registry.invoke(tool_name, args)
+            except Exception as e:
+                result = f"ERROR: {e}"
+        else:
+            # No tool — ask LLM to reason directly
+            resp = self.llm.invoke([HumanMessage(content=task["description"])])
+            result = resp.content
+
+        task_results.append({
+            "task_id": task["id"],
+            "description": task["description"],
+            "tool": tool_name,
+            "result": result,
+        })
+
+        return {
+            **state,
+            "task_results": task_results,
+            "current_task_index": idx + 1,
+            "executor_complete": idx + 1 >= len(tasks),
+        }

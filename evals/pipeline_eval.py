@@ -1,77 +1,72 @@
-"""Pipeline evaluation harness — runs the OPER graph against a ground-truth dataset
-and reports task completion rate, review score distribution, and retry rate.
-
-Usage
------
-    python evals/pipeline_eval.py --config configs/agents/sales_pipeline.yaml
-"""
+"""LangSmith + custom evaluation harness for OPER pipeline runs."""
 from __future__ import annotations
-import argparse
+
 import json
-import logging
-import statistics
+import os
 from pathlib import Path
-from dotenv import load_dotenv
+from typing import Any
+
+from langsmith import Client
+from langsmith.evaluation import evaluate
+from langsmith.schemas import Run, Example
+
 from core.graph_builder import build_graph
+from state.schema import AgentState
 
-logging.basicConfig(level=logging.INFO)
-load_dotenv()
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "")
 
-logger = logging.getLogger(__name__)
+EVAL_CASES: list[dict[str, Any]] = [
+    {
+        "config": "sales_pipeline",
+        "goal": "Qualify TechCorp as an NVIDIA AI Enterprise prospect. They are a SaaS company exploring LLM inference.",
+        "expected_keywords": ["qualify", "ICP", "nvidia", "enterprise"],
+    },
+    {
+        "config": "support_triage",
+        "goal": "Ticket #100: User cannot access NGC. Error: account suspended.",
+        "expected_keywords": ["suspended", "account", "escalat"],
+    },
+    {
+        "config": "data_analyst",
+        "goal": "What are the top 3 revenue drivers this quarter?",
+        "expected_keywords": ["revenue", "quarter"],
+    },
+]
 
 
-def run_eval(config_path: str, dataset_path: str) -> dict:
-    """Run graph against all examples in a JSONL dataset and return aggregate metrics.
-
-    Dataset format (JSONL, one JSON object per line)
-    -------------------------------------------------
-    {"goal": "...", "expected_output": "..."}  (expected_output used for future LLM-as-judge scoring)
-
-    Returns
-    -------
-    dict
-        {"n": int, "pass_rate": float, "avg_score": float, "avg_retries": float}
-
-    TODO
-    ----
-    - Add LLM-as-judge scoring against expected_output
-    - Log results to Langfuse dataset run
-    - Output HTML report via report_gen.py
-    """
-    graph = build_graph(config_path)
-    examples = [json.loads(line) for line in Path(dataset_path).read_text().splitlines() if line.strip()]
-
-    scores = []
-    retries = []
-    passes = 0
-
-    for i, ex in enumerate(examples):
-        logger.info(f"eval: running example {i+1}/{len(examples)}")
-        state = {
-            "goal": ex["goal"],
-            "tasks": [], "results": [], "review_score": None,
-            "retry_count": 0, "final_output": None, "messages": [],
-            "metadata": {"config_path": config_path},
+def run_local_eval(output_path: str = "evals/reports/pipeline_eval.json") -> list[dict]:
+    """Run all eval cases locally and produce a JSON report."""
+    results = []
+    for case in EVAL_CASES:
+        graph = build_graph(case["config"])
+        state: AgentState = {
+            "goal": case["goal"],
+            "session_id": f"eval-{case['config']}",
+            "config_name": case["config"],
+            "max_retries": 1,
+            "messages": [],
+            "task_results": [],
+            "retry_count": 0,
         }
-        result = graph.invoke(state, {"configurable": {"thread_id": f"eval-{i}"}})
-        score = result.get("review_score") or 0.0
-        scores.append(score)
-        retries.append(result.get("retry_count", 0))
-        if score >= 0.7:
-            passes += 1
+        final = graph.invoke(state, config={"configurable": {"thread_id": state["session_id"]}})
+        answer = (final.get("final_answer") or "").lower()
+        hits = [kw for kw in case["expected_keywords"] if kw.lower() in answer]
+        score = len(hits) / len(case["expected_keywords"])
+        results.append({
+            "config": case["config"],
+            "goal": case["goal"],
+            "reviewer_score": final.get("reviewer_score"),
+            "keyword_score": score,
+            "keywords_hit": hits,
+            "decision": final.get("reviewer_decision"),
+        })
 
-    return {
-        "n": len(examples),
-        "pass_rate": passes / len(examples) if examples else 0.0,
-        "avg_score": statistics.mean(scores) if scores else 0.0,
-        "avg_retries": statistics.mean(retries) if retries else 0.0,
-    }
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"Eval report: {output_path}")
+    return results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/agents/sales_pipeline.yaml")
-    parser.add_argument("--dataset", default="evals/datasets/sales_pipeline.jsonl")
-    args = parser.parse_args()
-    metrics = run_eval(args.config, args.dataset)
-    print(json.dumps(metrics, indent=2))
+    run_local_eval()

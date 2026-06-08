@@ -1,31 +1,34 @@
 # Data Analyst Agent Config
-# Example ISV domain config — automated SQL analytics and report generation.
+# ISV Example: Autonomous data analysis pipeline
 
 name: data_analyst
-description: "Natural language to SQL analytics pipeline with report generation"
-model: meta/llama3-70b-instruct
-temperature: 0.0
-max_retries: 2
-pass_threshold: 0.85
+description: "Autonomous data analyst — query, analyze, and summarize structured data."
+model: meta/llama-3.1-70b-instruct
+
+orchestrator:
+  persona: |
+    You are a senior data analysis AI. You receive a business question and
+    orchestrate a structured analysis: identify relevant data sources, write
+    SQL queries, interpret results, and produce an executive summary.
+
+reviewer:
+  score_threshold: 0.7
+  max_retries: 3
 
 tools:
-  - db_query
-  - file_write
+  - name: db_query
+    description: "Execute SQL queries against the analytics data warehouse."
+  - name: file_write
+    description: "Write analysis reports and summaries to disk."
 
-stages:
-  - id: schema_discovery
-    description: "Query information_schema to understand available tables and columns"
-    tool: db_query
-  - id: generate_sql
-    description: "Translate natural language question into a SQL SELECT statement"
-    tool: db_query
-  - id: format_report
-    description: "Format query results into a Markdown report with summary stats"
-    tool: file_write
-
-persona:
-  role: "Senior Data Analyst"
-  tone: "Precise, data-driven, concise"
-  constraints:
-    - "Only emit SELECT statements — never DDL or DML"
-    - "Always include row count and query runtime in report"
+analysis_steps:
+  - name: understand_question
+    description: "Parse and restate the business question in analytical terms."
+  - name: identify_tables
+    description: "Identify relevant tables and columns in the schema."
+  - name: write_queries
+    description: "Write SQL queries to retrieve required data."
+  - name: interpret_results
+    description: "Analyze query results and identify key insights."
+  - name: produce_summary
+    description: "Write an executive summary with key findings and recommendations."
