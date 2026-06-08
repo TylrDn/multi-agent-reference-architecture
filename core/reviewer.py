@@ -1,81 +1,68 @@
-"""Reviewer node — scores executor output and decides: terminate or retry."""
+"""Scores executor output and routes to retry or terminate."""
 from __future__ import annotations
 
 import json
-import os
+import logging
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from state.schema import AgentState
 
-NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+logger = logging.getLogger(__name__)
 
-REVIEWER_PROMPT = """\
-You are a reviewer agent. Evaluate whether the task results satisfy the original goal.
-
-Original goal: {goal}
-
-Task results:
-{results}
-
-Respond with a JSON object:
-{{
-  "score": 0.0-1.0,
-  "decision": "terminate" | "retry",
-  "reasoning": "brief explanation",
-  "final_answer": "synthesized answer if decision is terminate, else empty string"
-}}
-
-Use "retry" only if critical information is missing or a tool call failed. Default to "terminate".
+_SYSTEM_PROMPT = """\
+You are the Reviewer in a multi-agent pipeline.
+Evaluate the latest executor result against the original goal.
+Return ONLY a JSON object:
+{{"score": <0.0–1.0>, "feedback": "<one sentence>", "retry": <true|false>}}
+Set retry=true only if score < 0.7 AND there are remaining tasks.
 """
 
 
 class Reviewer:
-    """Scores the executor's output and routes the graph to retry or terminate."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        self.config = config
-        self.score_threshold = config.get("reviewer", {}).get("score_threshold", 0.7)
-        model = config.get("model", "meta/llama-3.1-70b-instruct")
-        self.llm = ChatOpenAI(
-            model=model,
-            openai_api_base=NIM_BASE_URL,
-            openai_api_key=NIM_API_KEY,
-            temperature=0.0,
-        )
+    def __init__(self, cfg: dict[str, Any]) -> None:
+        self.model = cfg.get("model", "gpt-4o-mini")
+        self.temperature = cfg.get("temperature", 0.0)
+        self.retry_threshold = cfg.get("retry_threshold", 0.7)
+        self.max_retries = cfg.get("max_retries", 2)
+        self.llm = ChatOpenAI(model=self.model, temperature=self.temperature)
 
     def run(self, state: AgentState) -> AgentState:
-        goal = state["goal"]
-        results = json.dumps(state.get("task_results", []), indent=2)
+        results = state.get("results", [])
         retry_count = state.get("retry_count", 0)
 
-        prompt = REVIEWER_PROMPT.format(goal=goal, results=results)
-        response = self.llm.invoke([HumanMessage(content=prompt)])
+        if not results:
+            state["retry"] = False
+            return state
+
+        latest = results[-1]
+        prompt = (
+            f"Original goal: {state['goal']}\n"
+            f"Latest result: {json.dumps(latest)}\n"
+            f"Retry count so far: {retry_count}"
+        )
+        messages = [
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+        response = self.llm.invoke(messages)
+        logger.info("[Reviewer] Raw response: %s", response.content)
 
         try:
-            raw = response.content.strip()
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            review = json.loads(raw.strip())
-        except (json.JSONDecodeError, IndexError):
-            review = {"score": 1.0, "decision": "terminate", "reasoning": "parse error", "final_answer": ""}
+            parsed = json.loads(response.content)
+            score = float(parsed.get("score", 1.0))
+            retry = bool(parsed.get("retry", False))
+        except (json.JSONDecodeError, ValueError):
+            score = 1.0
+            retry = False
 
-        decision = review.get("decision", "terminate")
-        score = float(review.get("score", 1.0))
-        if score < self.score_threshold:
-            decision = "retry"
+        if retry_count >= self.max_retries:
+            retry = False
 
-        return {
-            **state,
-            "reviewer_decision": decision,
-            "reviewer_score": score,
-            "reviewer_reasoning": review.get("reasoning", ""),
-            "final_answer": review.get("final_answer", ""),
-            "retry_count": retry_count + (1 if decision == "retry" else 0),
-            "messages": state.get("messages", []) + [response],
-        }
+        state["review_score"] = score
+        state["retry"] = retry
+        state["retry_count"] = retry_count + (1 if retry else 0)
+        state["messages"].append({"role": "reviewer", "content": response.content})
+        return state

@@ -1,15 +1,10 @@
-"""Assemble a LangGraph StateGraph from a YAML agent config file.
-
-This is the heart of the reference architecture — a single function that
-translates a declarative YAML pipeline spec into a runnable LangGraph.
-"""
+"""Assembles a LangGraph StateGraph from a YAML agent config file."""
 from __future__ import annotations
 
-import os
+import yaml
 from pathlib import Path
 from typing import Any
 
-import yaml
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -21,63 +16,50 @@ from core.reviewer import Reviewer
 from tools.registry import ToolRegistry
 
 
-DEFAULT_CONFIGS_DIR = Path(__file__).parent.parent / "configs" / "agents"
-
-
-def load_agent_config(config_name: str, configs_dir: Path = DEFAULT_CONFIGS_DIR) -> dict[str, Any]:
-    """Load a named YAML agent config."""
-    path = configs_dir / f"{config_name}.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"Agent config not found: {path}")
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
-def _should_retry(state: AgentState) -> str:
-    """Conditional edge: route based on reviewer decision."""
-    decision = state.get("reviewer_decision", "terminate")
-    retry_count = state.get("retry_count", 0)
-    max_retries = state.get("max_retries", 3)
-    if decision == "retry" and retry_count < max_retries:
-        return "executor"
-    return END
-
-
 def build_graph(
-    config_name: str,
-    configs_dir: Path = DEFAULT_CONFIGS_DIR,
-    use_checkpointer: bool = True,
-) -> StateGraph:
-    """Build and compile a LangGraph for the given agent config name.
+    config_path: str | Path,
+    checkpointer: MemorySaver | None = None,
+) -> Any:
+    """Load *config_path* YAML and wire a LangGraph StateGraph.
 
-    Args:
-        config_name: Name of a YAML file under configs/agents/ (without .yaml).
-        configs_dir: Directory to search for agent configs.
-        use_checkpointer: Attach an in-memory checkpointer for persistence.
-
-    Returns:
-        A compiled LangGraph app ready to invoke.
+    Returns a compiled graph ready to invoke.
     """
-    config = load_agent_config(config_name, configs_dir)
-    registry = ToolRegistry(config.get("tools", []))
+    config_path = Path(config_path)
+    with config_path.open() as fh:
+        cfg = yaml.safe_load(fh)
 
-    orchestrator = Orchestrator(config=config)
-    planner = Planner(config=config)
-    executor = Executor(tool_registry=registry, config=config)
-    reviewer = Reviewer(config=config)
+    registry = ToolRegistry(cfg.get("tools", []))
+    tools = registry.load()
 
-    graph = StateGraph(AgentState)
+    orchestrator = Orchestrator(cfg["orchestrator"])
+    planner = Planner(cfg["planner"])
+    executor = Executor(cfg["executor"], tools=tools)
+    reviewer = Reviewer(cfg["reviewer"])
 
-    graph.add_node("orchestrator", orchestrator.run)
-    graph.add_node("planner", planner.run)
-    graph.add_node("executor", executor.run)
-    graph.add_node("reviewer", reviewer.run)
+    builder = StateGraph(AgentState)
 
-    graph.set_entry_point("orchestrator")
-    graph.add_edge("orchestrator", "planner")
-    graph.add_edge("planner", "executor")
-    graph.add_edge("executor", "reviewer")
-    graph.add_conditional_edges("reviewer", _should_retry, {"executor": "executor", END: END})
+    builder.add_node("orchestrator", orchestrator.run)
+    builder.add_node("planner", planner.run)
+    builder.add_node("executor", executor.run)
+    builder.add_node("reviewer", reviewer.run)
 
-    checkpointer = MemorySaver() if use_checkpointer else None
-    return graph.compile(checkpointer=checkpointer)
+    builder.set_entry_point("orchestrator")
+    builder.add_edge("orchestrator", "planner")
+    builder.add_edge("planner", "executor")
+    builder.add_edge("executor", "reviewer")
+
+    builder.add_conditional_edges(
+        "reviewer",
+        _route_after_review,
+        {"retry": "executor", "done": END},
+    )
+
+    cp = checkpointer or MemorySaver()
+    return builder.compile(checkpointer=cp)
+
+
+def _route_after_review(state: AgentState) -> str:
+    """Route: retry executor when reviewer score is below threshold."""
+    if state.get("retry", False):
+        return "retry"
+    return "done"

@@ -1,45 +1,46 @@
-"""Orchestrator node — top-level router that frames the goal and delegates."""
+"""Top-level router: validates the incoming goal, enriches context, delegates to planner."""
 from __future__ import annotations
 
-import os
+import logging
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from state.schema import AgentState
 
-NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = """\
+You are the Orchestrator of a multi-agent pipeline.
+Your job is to:
+1. Validate the user goal is within scope.
+2. Enrich the context with any domain-specific framing.
+3. Return a single JSON object: {{"goal": "<refined goal>", "context": "<enriched context>"}}.
+Do not execute tasks yourself — only clarify and route.
+"""
 
 
 class Orchestrator:
-    """Receives the raw user goal and emits a structured intent for the Planner."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        self.config = config
-        self.persona = config.get("orchestrator", {}).get("persona", "You are a helpful orchestrator agent.")
-        model = config.get("model", "meta/llama-3.1-70b-instruct")
-        self.llm = ChatOpenAI(
-            model=model,
-            openai_api_base=NIM_BASE_URL,
-            openai_api_key=NIM_API_KEY,
-            temperature=0.0,
-        )
+    def __init__(self, cfg: dict[str, Any]) -> None:
+        self.model = cfg.get("model", "gpt-4o-mini")
+        self.temperature = cfg.get("temperature", 0.0)
+        self.llm = ChatOpenAI(model=self.model, temperature=self.temperature)
 
     def run(self, state: AgentState) -> AgentState:
-        goal = state["goal"]
+        logger.info("[Orchestrator] Routing goal: %s", state["goal"])
         messages = [
-            SystemMessage(content=self.persona),
-            HumanMessage(content=(
-                f"Goal: {goal}\n\n"
-                "Acknowledge the goal, identify the high-level intent, and pass it along. "
-                "Output only the structured intent as a single sentence."
-            )),
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=f"Goal: {state['goal']}"),
         ]
         response = self.llm.invoke(messages)
-        return {
-            **state,
-            "intent": response.content.strip(),
-            "messages": state.get("messages", []) + [response],
-        }
+        import json
+        try:
+            parsed = json.loads(response.content)
+            state["goal"] = parsed.get("goal", state["goal"])
+            state["context"] = parsed.get("context", "")
+        except json.JSONDecodeError:
+            logger.warning("[Orchestrator] Could not parse JSON; using raw content as context.")
+            state["context"] = response.content
+        state["messages"].append({"role": "orchestrator", "content": response.content})
+        return state

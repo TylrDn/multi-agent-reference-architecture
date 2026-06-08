@@ -1,65 +1,64 @@
-"""Executor node — runs tool calls for the current task in the plan."""
+"""Runs tool calls for the current task in the task list."""
 from __future__ import annotations
 
-import os
+import logging
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.tools import BaseTool
 
 from state.schema import AgentState
-from tools.registry import ToolRegistry
 
-NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NIM_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = """\
+You are the Executor in a multi-agent pipeline.
+You receive a single task and a set of available tools.
+Execute the task using the appropriate tool and return the result as a JSON object:
+{{"task_id": <id>, "result": <output>, "error": null}}
+If the tool call fails, set error to the error message and result to null.
+"""
 
 
 class Executor:
-    """Runs tool calls for each task in the plan, appends results to state."""
-
-    def __init__(self, tool_registry: ToolRegistry, config: dict[str, Any]) -> None:
-        self.registry = tool_registry
-        self.config = config
-        model = config.get("model", "meta/llama-3.1-70b-instruct")
-        self.llm = ChatOpenAI(
-            model=model,
-            openai_api_base=NIM_BASE_URL,
-            openai_api_key=NIM_API_KEY,
-            temperature=0.0,
-        ).bind_tools(self.registry.get_langchain_tools())
+    def __init__(self, cfg: dict[str, Any], tools: list[BaseTool]) -> None:
+        self.model = cfg.get("model", "gpt-4o-mini")
+        self.temperature = cfg.get("temperature", 0.0)
+        self.tools = {t.name: t for t in tools}
+        self.llm = ChatOpenAI(model=self.model, temperature=self.temperature).bind_tools(tools)
 
     def run(self, state: AgentState) -> AgentState:
-        tasks = state.get("tasks", [])
         idx = state.get("current_task_index", 0)
-        task_results = list(state.get("task_results", []))
-
+        tasks = state.get("tasks", [])
         if idx >= len(tasks):
-            return {**state, "executor_complete": True}
+            logger.warning("[Executor] No more tasks to execute.")
+            return state
 
         task = tasks[idx]
-        tool_name = task.get("tool", "none")
-        args = task.get("args", {})
+        logger.info("[Executor] Executing task %d: %s", task["id"], task["description"])
 
-        if tool_name != "none" and self.registry.has(tool_name):
-            try:
-                result = self.registry.invoke(tool_name, args)
-            except Exception as e:
-                result = f"ERROR: {e}"
-        else:
-            # No tool — ask LLM to reason directly
-            resp = self.llm.invoke([HumanMessage(content=task["description"])])
-            result = resp.content
+        prompt = (
+            f"Task ID: {task['id']}\n"
+            f"Description: {task['description']}\n"
+            f"Tool: {task.get('tool', 'none')}\n"
+            f"Inputs: {task.get('inputs', {})}\n"
+        )
+        messages = [
+            SystemMessage(content=_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+        response = self.llm.invoke(messages)
 
-        task_results.append({
+        task_result = {
             "task_id": task["id"],
             "description": task["description"],
-            "tool": tool_name,
-            "result": result,
-        })
-
-        return {
-            **state,
-            "task_results": task_results,
-            "current_task_index": idx + 1,
-            "executor_complete": idx + 1 >= len(tasks),
+            "output": response.content,
+            "tool_calls": getattr(response, "tool_calls", []),
         }
+        results = state.get("results", [])
+        results.append(task_result)
+        state["results"] = results
+        state["current_task_index"] = idx + 1
+        state["messages"].append({"role": "executor", "content": response.content})
+        return state
