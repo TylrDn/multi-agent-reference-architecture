@@ -1,47 +1,84 @@
-"""Example: Run the sales pipeline agent against a prospect qualification goal."""
+"""Demo: Run the sales pipeline agent on a sample goal.
+
+Usage::
+
+    python examples/run_sales_pipeline.py
+    python examples/run_sales_pipeline.py --goal "Qualify and draft outreach for Acme Corp"
+"""
 from __future__ import annotations
 
+import argparse
+import json
 import os
-import uuid
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-
 load_dotenv()
 
 from core.graph_builder import build_graph
-from state.schema import AgentState
+from state.checkpointer import get_checkpointer
+
+DEFAULT_GOAL = (
+    "Research Acme Corp (B2B SaaS, 500 employees, Series C) and draft a "
+    "personalised cold outreach email targeting their VP of Engineering."
+)
 
 
-def main():
-    graph = build_graph("sales_pipeline")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the sales pipeline agent")
+    parser.add_argument("--goal", default=DEFAULT_GOAL, help="Sales goal to achieve")
+    parser.add_argument("--config", default="configs/agents/sales_pipeline.yaml", help="Agent config path")
+    args = parser.parse_args()
 
-    initial_state: AgentState = {
-        "goal": (
-            "Qualify Acme Corp as a potential NVIDIA AI Enterprise customer. "
-            "They are a mid-market manufacturing company exploring computer vision "
-            "for quality control on their production line."
-        ),
-        "session_id": str(uuid.uuid4()),
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"Config not found: {config_path}")
+        sys.exit(1)
+
+    print(f"\n{'='*60}")
+    print("NVIDIA Multi-Agent Reference Architecture")
+    print("Domain: Sales Pipeline")
+    print(f"{'='*60}")
+    print(f"Goal: {args.goal}\n")
+
+    graph = build_graph(config_path)
+    checkpointer = get_checkpointer()
+    config = {"configurable": {"thread_id": "sales-demo-1"}}
+
+    initial_state = {
+        "goal": args.goal,
+        "domain": "sales",
         "config_name": "sales_pipeline",
-        "max_retries": 2,
         "messages": [],
+        "tasks": [],
         "task_results": [],
-        "retry_count": 0,
+        "iteration": 0,
     }
 
-    config = {"configurable": {"thread_id": initial_state["session_id"]}}
-    final_state = graph.invoke(initial_state, config=config)
+    print("Running OPER pipeline...\n")
+    final_state = None
+    for step in graph.stream(initial_state, config=config, stream_mode="values"):
+        final_state = step
+        if step.get("strategy") and not step.get("tasks"):
+            print(f"[Orchestrator] Strategy set: {step['strategy'][:100]}...")
+        if step.get("tasks") and not step.get("task_results"):
+            print(f"[Planner] {len(step['tasks'])} tasks planned:")
+            for i, t in enumerate(step["tasks"], 1):
+                print(f"  {i}. {t}")
+        if step.get("task_results"):
+            latest = step["task_results"][-1]
+            print(f"[Executor] Task complete: {latest['task'][:60]}...")
+        if step.get("review_score"):
+            print(f"[Reviewer] Score: {step['review_score']:.2f} | {step.get('review_feedback', '')[:80]}")
 
-    print("\n" + "="*60)
-    print("SALES PIPELINE RESULT")
-    print("="*60)
-    print(f"Intent:    {final_state.get('intent', 'N/A')}")
-    print(f"Tasks:     {len(final_state.get('tasks', []))} planned")
-    print(f"Score:     {final_state.get('reviewer_score', 'N/A')}")
-    print(f"Decision:  {final_state.get('reviewer_decision', 'N/A')}")
-    print(f"Retries:   {final_state.get('retry_count', 0)}")
-    print("\nFinal Answer:")
-    print(final_state.get("final_answer", "[No answer generated]"))
+    print(f"\n{'='*60}")
+    print("FINAL ANSWER")
+    print(f"{'='*60}")
+    if final_state:
+        print(final_state.get("final_answer", "No final answer produced."))
 
 
 if __name__ == "__main__":

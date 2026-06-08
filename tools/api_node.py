@@ -1,50 +1,51 @@
-"""Generic REST API tool node — GET / POST / PUT / PATCH / DELETE."""
+"""Generic REST API tool node."""
 from __future__ import annotations
 
-import json
-import logging
-from typing import Optional
+from typing import Any
 
 import httpx
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
 
-
-class APINodeInput(BaseModel):
+class APIToolInput(BaseModel):
     url: str = Field(description="Full URL to call")
-    method: str = Field(default="GET", description="HTTP method: GET, POST, PUT, PATCH, DELETE")
-    headers: Optional[dict] = Field(default=None, description="Optional HTTP headers")
-    body: Optional[dict] = Field(default=None, description="Optional JSON request body")
-    timeout: int = Field(default=30, description="Request timeout in seconds")
+    method: str = Field(default="GET", description="HTTP method")
+    payload: dict = Field(default_factory=dict, description="Request body for POST/PUT")
+    headers: dict = Field(default_factory=dict, description="Extra HTTP headers")
 
 
-@tool(args_schema=APINodeInput)
-def api_node(
-    url: str,
-    method: str = "GET",
-    headers: Optional[dict] = None,
-    body: Optional[dict] = None,
-    timeout: int = 30,
-) -> str:
-    """Make an HTTP request to a REST API and return the response as a JSON string."""
-    method = method.upper()
-    logger.info("[api_node] %s %s", method, url)
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method=method,
-                url=url,
-                headers=headers or {},
-                json=body,
-            )
-        response.raise_for_status()
-        try:
-            return json.dumps(response.json())
-        except Exception:  # noqa: BLE001
-            return response.text
-    except httpx.HTTPStatusError as exc:
-        return json.dumps({"error": str(exc), "status_code": exc.response.status_code})
-    except Exception as exc:  # noqa: BLE001
-        return json.dumps({"error": str(exc)})
+def _call_api(url: str, method: str = "GET", payload: dict | None = None, headers: dict | None = None) -> str:
+    """Make an HTTP request and return the response text."""
+    payload = payload or {}
+    headers = headers or {}
+    with httpx.Client(timeout=30.0) as client:
+        if method.upper() == "GET":
+            resp = client.get(url, headers=headers, params=payload)
+        elif method.upper() == "POST":
+            resp = client.post(url, json=payload, headers=headers)
+        elif method.upper() == "PUT":
+            resp = client.put(url, json=payload, headers=headers)
+        elif method.upper() == "DELETE":
+            resp = client.delete(url, headers=headers)
+        else:
+            return f"Unsupported HTTP method: {method}"
+    resp.raise_for_status()
+    return resp.text[:4000]  # Truncate large responses
+
+
+def make_api_tool(config: dict[str, Any]) -> StructuredTool:
+    """Create an API StructuredTool from a YAML tool definition."""
+    name = config["name"]
+    description = config.get("description", f"Call the {name} API endpoint")
+    base_url = config.get("base_url", "")
+
+    def _tool_fn(url: str = base_url, method: str = "GET", payload: dict | None = None, headers: dict | None = None) -> str:
+        return _call_api(url or base_url, method, payload or {}, headers or {})
+
+    return StructuredTool.from_function(
+        func=_tool_fn,
+        name=name,
+        description=description,
+        args_schema=APIToolInput,
+    )

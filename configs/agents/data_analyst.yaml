@@ -1,34 +1,59 @@
 # Data Analyst Agent Config
-# ISV Example: Autonomous data analysis pipeline
+# Example ISV deployment: natural language analytics over business data.
 
 name: data_analyst
-description: "Autonomous data analyst — query, analyze, and summarize structured data."
-model: meta/llama-3.1-70b-instruct
+domain: analytics
+description: >
+  Answer natural language questions about business data by generating
+  and executing SQL queries, interpreting results, and producing
+  structured insight reports.
 
-orchestrator:
-  persona: |
-    You are a senior data analysis AI. You receive a business question and
-    orchestrate a structured analysis: identify relevant data sources, write
-    SQL queries, interpret results, and produce an executive summary.
+model:
+  provider: nvidia_nim
+  name: meta/llama-3.1-70b-instruct
+  temperature: 0.0
 
 reviewer:
-  score_threshold: 0.7
-  max_retries: 3
+  score_threshold: 0.78
+  max_iterations: 3
 
-tools:
-  - name: db_query
-    description: "Execute SQL queries against the analytics data warehouse."
-  - name: file_write
-    description: "Write analysis reports and summaries to disk."
+orchestrator:
+  system_prompt: >
+    You are a Data Analytics Orchestrator. Understand the business question,
+    identify the relevant data domain (sales/finance/ops/marketing),
+    and determine whether a single query or multi-step analysis is needed.
 
-analysis_steps:
-  - name: understand_question
-    description: "Parse and restate the business question in analytical terms."
-  - name: identify_tables
-    description: "Identify relevant tables and columns in the schema."
-  - name: write_queries
-    description: "Write SQL queries to retrieve required data."
-  - name: interpret_results
-    description: "Analyze query results and identify key insights."
-  - name: produce_summary
-    description: "Write an executive summary with key findings and recommendations."
+planner:
+  system_prompt: >
+    You are the Analytics Planner. Break the analysis into steps:
+    1) Identify required tables and joins
+    2) Write SQL queries
+    3) Interpret results
+    4) Draft insight summary
+    Output a JSON array of task strings.
+
+executor:
+  system_prompt: >
+    You are the Analytics Executor. Use the analytics_db tool to run queries.
+    Always validate SQL before executing. Explain results in plain English.
+    Save reports using write_workspace_file.
+  tools:
+    - analytics_db
+    - write_workspace_file
+    - read_workspace_file
+
+reviewer:
+  system_prompt: >
+    You are the Analytics Reviewer. Score the analysis (0.0-1.0).
+    Check: Is the SQL correct? Are the insights accurate and actionable?
+    Is the business question fully answered? Output JSON: {"score": 0.0, "feedback": ""}
+
+common_schemas:
+  - table: customers
+    key_columns: [id, name, segment, arr, churn_risk_score, created_at]
+  - table: orders
+    key_columns: [id, customer_id, product_id, amount, status, created_at]
+  - table: events
+    key_columns: [id, customer_id, event_type, properties, timestamp]
+  - table: products
+    key_columns: [id, name, category, price, margin]

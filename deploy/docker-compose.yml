@@ -1,46 +1,32 @@
 version: "3.9"
 
 services:
-  agent:
+  agent-api:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: multi-agent-reference-architecture:latest
-    container_name: oper-agent
     ports:
-      - "8082:8082"
+      - "8083:8083"
     environment:
       - NVIDIA_API_KEY=${NVIDIA_API_KEY}
       - NIM_BASE_URL=${NIM_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - NIM_MODEL=${NIM_MODEL:-meta/llama-3.1-70b-instruct}
       - CHECKPOINT_BACKEND=${CHECKPOINT_BACKEND:-memory}
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./agent_demo.db}
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
-      - LANGCHAIN_TRACING_V2=true
-      - LANGCHAIN_PROJECT=multi-agent-reference-architecture
+      - REVIEWER_SCORE_THRESHOLD=${REVIEWER_SCORE_THRESHOLD:-0.75}
+      - MAX_ITERATIONS=${MAX_ITERATIONS:-3}
+      - DEFAULT_AGENT_CONFIG=${DEFAULT_AGENT_CONFIG:-configs/agents/sales_pipeline.yaml}
+    env_file:
+      - ../.env
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
     restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres-agent
-    environment:
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: agent
-      POSTGRES_DB: agentdb
-    ports:
-      - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    profiles: ["postgres"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d agentdb"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - /tmp/agent_workspace:/tmp/agent_workspace
 
-volumes:
-  pgdata:
+networks:
+  default:
+    name: multi-agent-net

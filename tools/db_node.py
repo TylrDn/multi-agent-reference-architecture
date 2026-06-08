@@ -1,45 +1,51 @@
-"""SQL query tool node — executes read-only SQL via SQLAlchemy."""
+"""SQL query tool node — text-to-SQL execution via SQLAlchemy."""
 from __future__ import annotations
 
-import json
-import logging
-from typing import Optional
+import os
+from typing import Any
 
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger(__name__)
+
+class DBToolInput(BaseModel):
+    query: str = Field(description="SQL query to execute")
+    limit: int = Field(default=50, description="Max rows to return")
 
 
-class DBNodeInput(BaseModel):
-    connection_string: str = Field(
-        description="SQLAlchemy connection string, e.g. postgresql+psycopg2://user:pass@host/db"
-    )
-    query: str = Field(description="SQL SELECT query to execute")
-    params: Optional[dict] = Field(default=None, description="Optional query parameters")
-    row_limit: int = Field(default=100, description="Maximum rows to return")
-
-
-@tool(args_schema=DBNodeInput)
-def db_node(
-    connection_string: str,
-    query: str,
-    params: Optional[dict] = None,
-    row_limit: int = 100,
-) -> str:
-    """Run a SQL query and return results as a JSON array of row dicts."""
+def _run_query(connection_string: str, query: str, limit: int = 50) -> str:
+    """Execute a SQL query and return results as a formatted string."""
     try:
-        from sqlalchemy import create_engine, text  # type: ignore
-    except ImportError as exc:
-        return json.dumps({"error": "sqlalchemy not installed", "detail": str(exc)})
-
-    logger.info("[db_node] Executing query: %s", query[:120])
-    try:
+        from sqlalchemy import create_engine, text
         engine = create_engine(connection_string)
         with engine.connect() as conn:
-            result = conn.execute(text(query), params or {})
-            rows = [dict(row._mapping) for row in result.fetchmany(row_limit)]
-        return json.dumps(rows, default=str)
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[db_node] Query failed: %s", exc)
-        return json.dumps({"error": str(exc)})
+            result = conn.execute(text(query))
+            rows = result.fetchmany(limit)
+            cols = list(result.keys())
+            if not rows:
+                return "Query returned no results."
+            header = " | ".join(cols)
+            separator = "-" * len(header)
+            data_rows = [" | ".join(str(v) for v in row) for row in rows]
+            return "\n".join([header, separator] + data_rows)
+    except Exception as e:
+        return f"Database error: {e}"
+
+
+def make_db_tool(config: dict[str, Any]) -> StructuredTool:
+    """Create a DB StructuredTool from a YAML tool definition."""
+    name = config["name"]
+    description = config.get("description", f"Execute SQL queries against the {name} database")
+    connection_string = config.get("connection_string") or os.getenv("DB_CONNECTION_STRING", "")
+
+    def _tool_fn(query: str, limit: int = 50) -> str:
+        if not connection_string:
+            return "No database connection string configured."
+        return _run_query(connection_string, query, limit)
+
+    return StructuredTool.from_function(
+        func=_tool_fn,
+        name=name,
+        description=description,
+        args_schema=DBToolInput,
+    )

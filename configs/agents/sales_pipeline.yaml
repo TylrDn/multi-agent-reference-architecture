@@ -1,51 +1,74 @@
 # Sales Pipeline Agent Config
-# Generalized from the 8-stage WatsonX competition architecture
-# OPER pattern: Orchestrator -> Planner -> Executor -> Reviewer
+# Generalised from the WatsonX Competition 8-stage sales pipeline.
+# Maps to the OPER pattern: Orchestrator -> Planner -> Executor -> Reviewer
 
 name: sales_pipeline
-description: "8-stage B2B sales pipeline agent — prospect qualification to close."
-model: meta/llama-3.1-70b-instruct
+domain: sales
+description: >
+  Multi-stage B2B sales pipeline agent that qualifies leads,
+  researches prospects, drafts outreach, and tracks pipeline stages.
 
-orchestrator:
-  persona: |
-    You are a senior sales orchestration AI. Your role is to coordinate a
-    multi-stage B2B sales pipeline. You receive a sales goal and ensure
-    it is broken down into the correct sequence of pipeline stages.
+model:
+  provider: nvidia_nim
+  name: meta/llama-3.1-70b-instruct
+  temperature: 0.0
 
 reviewer:
-  score_threshold: 0.75
-  max_retries: 2
+  score_threshold: 0.80
+  max_iterations: 3
 
-tools:
-  - name: db_query
-    description: "Query CRM database for prospect, opportunity, and account data."
-  - name: api_get
-    description: "Fetch external enrichment data (LinkedIn, Clearbit, etc.)."
-  - name: file_write
-    description: "Write sales artifacts (proposals, call summaries) to disk."
+orchestrator:
+  system_prompt: >
+    You are a B2B Sales Orchestrator. Your role is to understand the sales
+    goal, identify the sales stage (prospecting/qualification/outreach/closing),
+    and set the strategy for the planner. Be concise and directive.
 
-pipeline_stages:
+planner:
+  system_prompt: >
+    You are the Sales Planner. Decompose the sales goal into concrete,
+    ordered tasks. Tasks should map to sales activities: research, qualify,
+    draft email, schedule follow-up, update CRM. Output a JSON array of tasks.
+
+executor:
+  system_prompt: >
+    You are the Sales Executor. Complete each task using available tools.
+    Use the analytics_db to look up prospect data. Use web_search for company
+    research. Use write_workspace_file to save drafts.
+  tools:
+    - web_search
+    - analytics_db
+    - write_workspace_file
+    - read_workspace_file
+
+reviewer:
+  system_prompt: >
+    You are the Sales Reviewer. Score the output quality (0.0-1.0).
+    Check: Is the task complete? Is the content accurate and professional?
+    Does it move the deal forward? Output JSON: {"score": 0.0, "feedback": ""}
+
+# Pipeline stages reference (informational)
+stages:
   - id: 1
-    name: prospect_qualification
-    description: "Evaluate whether the prospect meets ICP criteria."
+    name: Lead Qualification
+    criteria: [budget, authority, need, timeline]
   - id: 2
-    name: discovery
-    description: "Identify prospect pain points and business objectives."
+    name: Prospect Research
+    criteria: [company_size, industry, tech_stack, recent_news]
   - id: 3
-    name: solution_mapping
-    description: "Map NVIDIA solutions to identified pain points."
+    name: Outreach Drafting
+    criteria: [personalisation, value_prop, clear_cta]
   - id: 4
-    name: technical_validation
-    description: "Confirm technical fit and architecture compatibility."
+    name: Follow-up Scheduling
+    criteria: [timing, channel, touchpoint_sequence]
   - id: 5
-    name: business_case
-    description: "Build ROI model and quantify business value."
+    name: Proposal Generation
+    criteria: [pricing, ROI_framing, competitive_differentiation]
   - id: 6
-    name: proposal
-    description: "Draft and deliver a tailored solution proposal."
+    name: Objection Handling
+    criteria: [empathy, evidence, reframe]
   - id: 7
-    name: negotiation
-    description: "Handle objections and finalize commercial terms."
+    name: Contract & Closing
+    criteria: [terms, urgency, exec_alignment]
   - id: 8
-    name: close
-    description: "Confirm agreement and hand off to implementation."
+    name: Post-Sale Handoff
+    criteria: [success_criteria, onboarding, expansion_signal]

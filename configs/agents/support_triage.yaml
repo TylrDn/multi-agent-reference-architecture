@@ -1,38 +1,63 @@
 # Customer Support Triage Agent Config
-# ISV Example: Tier-1 support automation
+# Example ISV deployment: enterprise customer support automation.
 
 name: support_triage
-description: "Automated tier-1 customer support triage with escalation routing."
-model: meta/llama-3.1-70b-instruct
+domain: support
+description: >
+  Triage incoming customer support tickets: classify severity,
+  retrieve relevant knowledge base articles, draft first response,
+  and escalate if confidence is low.
 
-orchestrator:
-  persona: |
-    You are a customer support orchestration AI. Your role is to triage incoming
-    support tickets, classify severity, retrieve relevant knowledge base articles,
-    and either resolve the issue or escalate to the appropriate human team.
+model:
+  provider: nvidia_nim
+  name: meta/llama-3.1-70b-instruct
+  temperature: 0.0
 
 reviewer:
-  score_threshold: 0.8
-  max_retries: 2
+  score_threshold: 0.80
+  max_iterations: 2
 
-tools:
-  - name: db_query
-    description: "Query the support ticketing system and customer account database."
-  - name: file_read
-    description: "Read knowledge base articles from the support documentation store."
-  - name: api_post
-    description: "Create or update tickets in the external ticketing system."
+orchestrator:
+  system_prompt: >
+    You are a Support Triage Orchestrator. Classify the issue severity
+    (P1/P2/P3/P4), identify the product area, and set the response strategy.
+    P1 = production down, P2 = major degradation, P3 = minor issue, P4 = question.
 
-triage_categories:
-  - name: billing
-    severity: medium
-    escalation_team: billing_ops
-  - name: technical_outage
-    severity: critical
-    escalation_team: on_call_engineering
-  - name: feature_request
-    severity: low
-    escalation_team: product_management
-  - name: account_access
-    severity: high
-    escalation_team: account_security
+planner:
+  system_prompt: >
+    You are the Support Planner. Break the triage task into steps:
+    1) Search KB for relevant articles
+    2) Diagnose root cause
+    3) Draft customer response
+    4) Flag for escalation if needed
+    Output a JSON array of task strings.
+
+executor:
+  system_prompt: >
+    You are the Support Executor. Use tools to search the knowledge base,
+    query ticket history, and draft professional, empathetic responses.
+    Always cite KB article IDs in your response.
+  tools:
+    - web_search
+    - read_workspace_file
+    - write_workspace_file
+
+reviewer:
+  system_prompt: >
+    You are the Support Reviewer. Score the drafted response (0.0-1.0).
+    Check: Is the issue correctly diagnosed? Is the response empathetic?
+    Is the solution technically accurate? Output JSON: {"score": 0.0, "feedback": ""}
+
+severity_matrix:
+  P1:
+    response_sla_minutes: 15
+    escalation: immediate
+  P2:
+    response_sla_minutes: 60
+    escalation: shift_lead
+  P3:
+    response_sla_minutes: 240
+    escalation: next_business_day
+  P4:
+    response_sla_minutes: 1440
+    escalation: none

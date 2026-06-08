@@ -1,78 +1,84 @@
-# Multi-Agent Reference Architecture — OPER Pattern
+# Architecture: OPER Multi-Agent Pattern
 
-## Overview
+This repo implements the **OPER pattern** — a generalizable multi-agent architecture
+for enterprise agentic AI deployments built on LangGraph and NVIDIA NIM.
 
-The **OPER pattern** (Orchestrator → Planner → Executor → Reviewer) is a generalizable
-multi-agent blueprint for enterprise agentic AI deployments. A single `graph_builder.py`
-function assembles a LangGraph `StateGraph` from a declarative YAML config — no hardcoded pipelines.
-
-## OPER Flow Diagram
+## Core Pattern
 
 ```mermaid
 graph TD
-    User([User Goal]) --> Orch[Orchestrator\nFrames intent]
-    Orch --> Plan[Planner\nDecomposes into tasks]
-    Plan --> Exec[Executor\nRuns tool calls]
-    Exec --> Rev[Reviewer\nScores output]
-    Rev -->|score ≥ threshold| END([Final Answer])
-    Rev -->|score < threshold & retries left| Exec
-
-    subgraph Tools
-        Exec --> API[api_get / api_post]
-        Exec --> DB[db_query]
-        Exec --> File[file_read / file_write]
-        Exec --> Custom[Custom Tool Nodes]
-    end
-
-    subgraph NIM Layer
-        Orch --> NIM[NVIDIA NIM]
-        Plan --> NIM
-        Exec --> NIM
-        Rev --> NIM
-    end
-
-    subgraph State
-        Plan --> S[AgentState TypedDict]
-        Exec --> S
-        Rev --> S
-    end
+    A([User Goal]) --> B[Orchestrator]
+    B -->|Strategy| C[Planner]
+    C -->|Task List| D[Executor]
+    D -->|Results| E[Reviewer]
+    E -->|Score >= 0.75| F([Final Answer])
+    E -->|Score < 0.75 & iterations < max| C
+    D -->|Tool Call| G[ToolRegistry]
+    G --> H[API Node]
+    G --> I[DB Node]
+    G --> J[File Node]
 ```
 
-## Key Design Decisions
+## Node Responsibilities
 
-- **YAML-driven:** All agent personas, model configs, tools, and domain logic live in
-  `configs/agents/*.yaml` — engineers customize without touching Python
-- **Single abstraction:** Every domain (sales, support, analytics) maps to the same
-  OPER graph; only the YAML changes
-- **Conditional retry loop:** The Reviewer routes back to Executor if `score < threshold`
-  and retries remain — self-healing without infinite loops
-- **Tool registry:** `ToolRegistry` dynamically imports tool functions from `tools.yaml`
-  and wraps them as LangChain `StructuredTool` objects — drop-in extensible
-- **NIM-native:** All LLM calls route through NVIDIA NIM's OpenAI-compatible endpoint;
-  swap models by changing one YAML key
-
-## Provided Domain Configs
-
-| Config | Domain | Stages / Categories |
+| Node | Role | Key Output |
 |---|---|---|
-| `sales_pipeline.yaml` | B2B Sales | 8-stage pipeline (qualify → close) |
-| `support_triage.yaml` | Customer Support | Severity triage + escalation routing |
-| `data_analyst.yaml` | Business Analytics | SQL → interpret → executive summary |
+| **Orchestrator** | Understand goal, set strategy | `strategy: str` |
+| **Planner** | Decompose strategy into tasks | `tasks: list[str]` |
+| **Executor** | Run tool calls per task | `task_results: list[dict]` |
+| **Reviewer** | Score output, route retry/done | `review_score: float` |
 
-## Adding a New Domain
+## State Flow
 
-1. Copy any `configs/agents/*.yaml` as a template
-2. Set `name`, `description`, `model`, `tools`, `orchestrator.persona`
-3. Adjust `reviewer.score_threshold` and `max_retries`
-4. Run: `python -m examples.run_<your_config>`
+```mermaid
+stateDiagram-v2
+    [*] --> Orchestrator: user goal
+    Orchestrator --> Planner: strategy
+    Planner --> Executor: task list
+    Executor --> Reviewer: task results
+    Reviewer --> Planner: score < threshold
+    Reviewer --> [*]: score >= threshold OR max iterations
+```
 
-No Python changes required.
+## Config-Driven Design
+
+The graph is assembled from YAML agent configs — no hardcoded pipelines.
+
+```yaml
+# configs/agents/sales_pipeline.yaml
+name: sales_pipeline
+domain: sales
+model:
+  provider: nvidia_nim
+  name: meta/llama-3.1-70b-instruct
+reviewer:
+  score_threshold: 0.80
+  max_iterations: 3
+```
+
+`core/graph_builder.py` reads this config and dynamically wires the LangGraph nodes.
+
+## Tool Registry
+
+Tools are registered in `configs/tools.yaml` and loaded dynamically:
+
+```python
+registry = ToolRegistry()
+tools = registry.get_tools()   # Returns list[StructuredTool]
+result = registry.invoke("web_search", {"query": "NVIDIA NIM"})
+```
+
+Supported tool types: `api` | `db` | `file`
 
 ## Cross-Repo Integration
 
-- [`nvidia-nim-agent-toolkit`](https://github.com/TylrDn/nvidia-nim-agent-toolkit) — specialized
-  NIM agents (API, SQL, Doc) can be wired in as Executor tool nodes
-- [`enterprise-rag-pipeline`](https://github.com/TylrDn/enterprise-rag-pipeline) — the
-  `/query` endpoint can be registered as a `rag_query` tool in any agent config
-- [`agentic-guardrails-eval`](https://github.com/TylrDn/agentic-guardrails-eval) — the
-  `/run` endpoint is a first-class target for red-team attack testing
+```mermaid
+graph LR
+    A[nvidia-nim-agent-toolkit] -->|NIM client| B[multi-agent-reference-architecture]
+    B -->|REST /run| C[enterprise-rag-pipeline]
+    B -->|test target| D[agentic-guardrails-eval]
+```
+
+- **Repo 1** (`nvidia-nim-agent-toolkit`): NIM client pattern sourced from here
+- **Repo 2** (`enterprise-rag-pipeline`): Executor's `web_search` tool can proxy to RAG `/query` endpoint
+- **Repo 5** (`agentic-guardrails-eval`): Uses this repo's `/run` endpoint as the red-team target

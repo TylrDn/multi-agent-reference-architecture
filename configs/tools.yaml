@@ -1,27 +1,33 @@
 # Tool capability registry
-# Each tool maps a name to a Python module + function for dynamic loading
+# Each entry is loaded by tools/registry.py and instantiated as a LangChain StructuredTool.
+# Supported types: api | db | file
 
-api_get:
-  module: tools.api_node
-  function: api_get
-  description: "Perform an HTTP GET request to a URL and return the response body."
+tools:
+  - name: web_search
+    type: api
+    description: >-
+      Search the web for information. Pass a search query as the `url` param
+      pointing to a search API endpoint (e.g. SerpAPI, Brave Search).
+    base_url: https://api.search.brave.com/res/v1/web/search
 
-api_post:
-  module: tools.api_node
-  function: api_post
-  description: "Perform an HTTP POST request with a JSON payload."
+  - name: internal_api
+    type: api
+    description: Call an internal REST API endpoint with optional JSON payload.
+    base_url: ""
 
-db_query:
-  module: tools.db_node
-  function: db_query
-  description: "Execute a read-only SQL SELECT query and return formatted results."
+  - name: analytics_db
+    type: db
+    description: >-
+      Query the analytics database using SQL. Returns tabular results.
+      Schema includes: customers, orders, events, products tables.
+    connection_string: ""  # Set DB_CONNECTION_STRING env var
 
-file_read:
-  module: tools.file_node
-  function: file_read
-  description: "Read a text file from the agent sandbox directory."
+  - name: read_workspace_file
+    type: file
+    operation: read
+    description: Read a file from the agent workspace directory.
 
-file_write:
-  module: tools.file_node
-  function: file_write
-  description: "Write text content to a file in the agent sandbox directory."
+  - name: write_workspace_file
+    type: file
+    operation: write
+    description: Write content to a file in the agent workspace directory.
