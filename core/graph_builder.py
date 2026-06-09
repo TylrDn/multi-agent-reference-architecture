@@ -1,6 +1,7 @@
 """Assembles a LangGraph StateGraph from a YAML agent config."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,13 +13,44 @@ from core.orchestrator import orchestrator_node
 from core.planner import planner_node
 from core.reviewer import reviewer_node
 from state.schema import MultiAgentState
+from tools.registry import TOOL_MAP
+
+logger = logging.getLogger(__name__)
+
+_REQUIRED_AGENT_FIELDS = ("name", "tools", "persona")
 
 
 def load_config(config_name: str) -> dict[str, Any]:
-    """Load agent persona config from configs/agents/<name>.yaml."""
+    """Load and validate agent persona config from configs/agents/<name>.yaml.
+
+    Args:
+        config_name: YAML filename stem under ``configs/agents/``.
+
+    Returns:
+        Parsed config dict with normalized ``agent`` block at top level for nodes.
+
+    Raises:
+        ValueError: If required agent fields are missing.
+        FileNotFoundError: If the config file does not exist.
+    """
     config_path = Path(__file__).parent.parent / "configs" / "agents" / f"{config_name}.yaml"
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Agent config not found: {config_path}")
+
+    with open(config_path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    agent = raw.get("agent", raw)
+    for field in _REQUIRED_AGENT_FIELDS:
+        if field not in agent or agent[field] in (None, ""):
+            raise ValueError(f"{field} is required")
+
+    tools: list[str] = agent.get("tools", [])
+    for tool_name in tools:
+        if tool_name not in TOOL_MAP:
+            raise KeyError(f"{tool_name} not found in registry")
+
+    return {"agent": agent, **raw}
 
 
 class GraphBuilder:
@@ -26,6 +58,7 @@ class GraphBuilder:
 
     def __init__(self, config_name: str = "sales_pipeline") -> None:
         self.config = load_config(config_name)
+        self.agent = self.config["agent"]
         self.graph = self._build()
 
     def _build(self) -> Any:
@@ -63,9 +96,9 @@ class GraphBuilder:
             "results": [],
             "final_answer": "",
             "review_score": 0.0,
-            "confidence_threshold": float(self.config.get("confidence_threshold", 0.85)),
+            "confidence_threshold": float(self.agent.get("confidence_threshold", 0.85)),
             "retry_count": 0,
-            "agent_config": self.config,
+            "agent_config": self.agent,
         }
         return self.graph.invoke(initial)
 
@@ -83,5 +116,5 @@ def build_graph(config_name: "str | Path") -> Any:
     """
     if isinstance(config_name, Path):
         config_name = config_name.stem
-    builder = GraphBuilder(config_name)
+    builder = GraphBuilder(str(config_name))
     return builder.graph

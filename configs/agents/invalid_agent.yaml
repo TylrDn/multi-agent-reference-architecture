@@ -1,0 +1,5 @@
+agent:
+  name: invalid_agent
+  role: Test
+  tools:
+    - db_query

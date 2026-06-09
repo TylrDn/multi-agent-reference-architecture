@@ -88,8 +88,10 @@ curl -X POST http://localhost:8082/run \
 ## Docker
 
 ```bash
-cd deploy && docker-compose up --build
+docker compose up --build
 ```
+
+API on port **8080** (agent) when using root compose with NIM profile.
 
 ## Key Components
 

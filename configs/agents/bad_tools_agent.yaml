@@ -1,0 +1,6 @@
+agent:
+  name: bad_tools_agent
+  role: Test
+  persona: Test agent with bad tool reference
+  tools:
+    - nonexistent_tool

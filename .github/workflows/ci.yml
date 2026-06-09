@@ -35,4 +35,4 @@ jobs:
             --disable-error-code=type-var
 
       - name: Run tests
-        run: pytest tests/ -v --cov=core --cov=tools --cov=state
+        run: pytest tests/ -v --cov=core --cov=tools --cov=state --cov-report=term-missing --cov-fail-under=80

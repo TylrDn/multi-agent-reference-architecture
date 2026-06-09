@@ -17,6 +17,9 @@ sqlalchemy>=2.0.0
 pyyaml>=6.0.0
 python-dotenv>=1.0.0
 
+# Observability
+langfuse>=2.0.0
+
 # Eval
 langsmith>=0.1.75
 
@@ -25,3 +28,4 @@ ruff>=0.4.0
 mypy>=1.10.0
 pytest>=8.2.0
 pytest-cov>=5.0.0
+pytest-mock>=3.14.0

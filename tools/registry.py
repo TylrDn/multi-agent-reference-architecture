@@ -13,6 +13,9 @@ _TOOL_MAP: dict[str, BaseTool] = {
     "file_read": file_tool,
 }
 
+# Public alias for graph_builder validation
+TOOL_MAP = _TOOL_MAP
+
 
 class ToolRegistry:
     """Resolves tool names (from YAML config) to LangChain tool objects."""
