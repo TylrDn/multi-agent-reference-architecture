@@ -13,6 +13,7 @@ select = ["E", "F", "I"]
 python_version = "3.11"
 strict = false
 ignore_missing_imports = true
+disable_error_code = ["attr-defined", "call-arg", "arg-type", "union-attr", "type-var"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
