@@ -68,3 +68,19 @@ class GraphBuilder:
             "agent_config": self.config,
         }
         return self.graph.invoke(initial)
+
+
+def build_graph(config_name: str):
+    """Convenience factory: build a compiled LangGraph for the given config name.
+
+    Args:
+        config_name: YAML config filename stem under ``configs/agents/``
+                     (e.g. ``"sales_pipeline"``).
+
+    Returns:
+        A compiled LangGraph ``CompiledStateGraph``.
+    """
+    from pathlib import Path  # noqa: PLC0415
+    config_path = Path("configs/agents") / f"{config_name}.yaml"
+    builder = GraphBuilder(config_path)
+    return builder.build()

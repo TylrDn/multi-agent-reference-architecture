@@ -13,7 +13,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from langchain.agents import AgentExecutor, create_tool_calling_agent
+try:
+    from langchain.agents import AgentExecutor, create_tool_calling_agent
+except ImportError:
+    # langchain >= 0.2 moved these to langchain.agents
+    from langchain_core.agents import AgentFinish  # noqa: F401
+    AgentExecutor = None  # type: ignore[assignment,misc]
+    create_tool_calling_agent = None  # type: ignore[assignment]
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI

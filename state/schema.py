@@ -17,3 +17,7 @@ class MultiAgentState(TypedDict):
     confidence_threshold: float
     retry_count: int
     agent_config: dict[str, Any]
+
+
+# Alias for backward compatibility with tests that import AgentState
+AgentState = MultiAgentState

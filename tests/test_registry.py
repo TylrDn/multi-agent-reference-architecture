@@ -1,26 +1,26 @@
 """Unit tests for the tool registry."""
-import pytest
-
-from tools.registry import get_tool, list_tools, register_tool
+from tools.registry import ToolRegistry
 
 
-def test_register_and_get():
-    @register_tool("test_tool_xyz")
-    def my_fn(x: int) -> int:
-        return x * 2
-
-    fn = get_tool("test_tool_xyz")
-    assert fn(3) == 6
+def test_registry_returns_api_tool():
+    registry = ToolRegistry(["api_post"])
+    tools = registry.get_tools()
+    assert len(tools) == 1
 
 
-def test_get_unknown_tool_raises():
-    with pytest.raises(KeyError):
-        get_tool("nonexistent_tool_abc")
+def test_registry_returns_all_known_tools():
+    registry = ToolRegistry(["api_post", "db_query", "file_read"])
+    tools = registry.get_tools()
+    assert len(tools) == 3
 
 
-def test_list_tools_includes_registered():
-    @register_tool("another_test_tool")
-    def dummy():
-        pass
+def test_registry_skips_unknown_tools():
+    registry = ToolRegistry(["api_post", "nonexistent_tool"])
+    tools = registry.get_tools()
+    assert len(tools) == 1
 
-    assert "another_test_tool" in list_tools()
+
+def test_registry_empty():
+    registry = ToolRegistry([])
+    tools = registry.get_tools()
+    assert tools == []

@@ -13,3 +13,8 @@ class Checkpointer:
     @property
     def saver(self) -> MemorySaver:
         return self._saver
+
+
+def get_checkpointer() -> Checkpointer:
+    """Factory function — returns a new in-memory Checkpointer."""
+    return Checkpointer()
