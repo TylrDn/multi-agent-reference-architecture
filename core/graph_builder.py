@@ -70,17 +70,18 @@ class GraphBuilder:
         return self.graph.invoke(initial)
 
 
-def build_graph(config_name: str):
+def build_graph(config_name: "str | Path") -> Any:
     """Convenience factory: build a compiled LangGraph for the given config name.
 
     Args:
         config_name: YAML config filename stem under ``configs/agents/``
-                     (e.g. ``"sales_pipeline"``).
+                     (e.g. ``"sales_pipeline"``), or a ``Path`` whose stem
+                     is used (e.g. ``Path("configs/agents/sales_pipeline.yaml")``).
 
     Returns:
         A compiled LangGraph ``CompiledStateGraph``.
     """
-    from pathlib import Path  # noqa: PLC0415
-    config_path = Path("configs/agents") / f"{config_name}.yaml"
-    builder = GraphBuilder(config_path)
-    return builder.build()
+    if isinstance(config_name, Path):
+        config_name = config_name.stem
+    builder = GraphBuilder(config_name)
+    return builder.graph
