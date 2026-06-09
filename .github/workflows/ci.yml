@@ -24,7 +24,15 @@ jobs:
         run: ruff check .
 
       - name: Type-check with mypy
-        run: mypy core/ state/ tools/ api/ --ignore-missing-imports --no-strict-optional --disable-error-code=attr-defined,call-arg,arg-type,union-attr,type-var
+        run: |
+          mypy core/ state/ tools/ api/ \
+            --ignore-missing-imports \
+            --no-strict-optional \
+            --disable-error-code=attr-defined \
+            --disable-error-code=call-arg \
+            --disable-error-code=arg-type \
+            --disable-error-code=union-attr \
+            --disable-error-code=type-var
 
       - name: Run tests
         run: pytest tests/ -v --cov=core --cov=tools --cov=state
