@@ -5,10 +5,10 @@ import uuid
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from core.graph_builder import build_graph
 from state.schema import AgentState
+
+load_dotenv()
 
 
 def main():
@@ -30,9 +30,9 @@ def main():
     config = {"configurable": {"thread_id": initial_state["session_id"]}}
     final_state = graph.invoke(initial_state, config=config)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("DATA ANALYST RESULT")
-    print("="*60)
+    print("=" * 60)
     print(final_state.get("final_answer", "[No answer generated]"))
 
 

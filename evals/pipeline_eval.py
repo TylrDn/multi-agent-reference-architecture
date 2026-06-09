@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 from core.graph_builder import GraphBuilder
 
 load_dotenv()

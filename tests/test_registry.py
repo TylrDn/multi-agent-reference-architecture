@@ -1,6 +1,7 @@
 """Unit tests for the tool registry."""
 import pytest
-from tools.registry import register_tool, get_tool, list_tools
+
+from tools.registry import get_tool, list_tools, register_tool
 
 
 def test_register_and_get():

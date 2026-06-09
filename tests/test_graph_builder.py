@@ -1,6 +1,7 @@
 """Smoke test for build_graph."""
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 def test_build_graph_sales():

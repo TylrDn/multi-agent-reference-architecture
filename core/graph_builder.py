@@ -1,16 +1,17 @@
 """Assembles a LangGraph StateGraph from a YAML agent config."""
 from __future__ import annotations
 
-import yaml
 from pathlib import Path
 from typing import Any
 
-from langgraph.graph import StateGraph, END
-from state.schema import MultiAgentState
+import yaml
+from langgraph.graph import END, StateGraph
+
+from core.executor import executor_node
 from core.orchestrator import orchestrator_node
 from core.planner import planner_node
-from core.executor import executor_node
 from core.reviewer import reviewer_node
+from state.schema import MultiAgentState
 
 
 def load_config(config_name: str) -> dict[str, Any]:

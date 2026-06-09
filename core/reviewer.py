@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+
 from langchain_openai import ChatOpenAI
+
 from state.schema import MultiAgentState
 
 NIM_BASE_URL = os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
